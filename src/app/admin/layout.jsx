@@ -19,6 +19,7 @@ import {
   ShieldCheck,
   ChevronRight,
 } from 'lucide-react';
+import ConfirmModal from '@/components/ConfirmModal.jsx';
 
 const NAV_ITEMS = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
@@ -35,6 +36,7 @@ export default function AdminLayout({ children }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [adminUser, setAdminUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -59,6 +61,7 @@ export default function AdminLayout({ children }) {
     } catch (e) {
       console.error(e);
     }
+    setShowLogoutModal(false);
     router.push('/login');
     router.refresh();
   };
@@ -93,7 +96,7 @@ export default function AdminLayout({ children }) {
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 text-rose-600 dark:text-rose-400 text-xs font-semibold hover:bg-rose-100 transition active:scale-95"
             title="Log out of administrator session"
           >
@@ -214,7 +217,7 @@ export default function AdminLayout({ children }) {
 
           <button
             type="button"
-            onClick={handleLogout}
+            onClick={() => setShowLogoutModal(true)}
             className="w-full flex items-center justify-center gap-2 rounded-xl border border-rose-800/40 bg-rose-950/30 text-rose-300 hover:bg-rose-900/60 hover:text-white hover:border-rose-700 px-3.5 py-2 text-xs font-semibold transition active:scale-95 shadow-xs"
             title="Sign out of administrative account"
           >
@@ -242,7 +245,7 @@ export default function AdminLayout({ children }) {
 
             <button
               type="button"
-              onClick={handleLogout}
+              onClick={() => setShowLogoutModal(true)}
               className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/80 dark:bg-rose-950/40 text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 text-xs font-semibold transition active:scale-95 shadow-xs"
               title="Sign out of administrative session"
             >
@@ -254,6 +257,19 @@ export default function AdminLayout({ children }) {
 
         {children}
       </div>
+
+      {/* Logout Confirmation Prompt Modal */}
+      <ConfirmModal
+        isOpen={showLogoutModal}
+        title="Sign Out Confirmation"
+        message="Are you sure you want to log out of the admin panel? You will need your credentials to sign back in."
+        confirmLabel="Yes, Log Out"
+        cancelLabel="Stay Logged In"
+        isDestructive={true}
+        icon={LogOut}
+        onConfirm={handleLogout}
+        onCancel={() => setShowLogoutModal(false)}
+      />
     </div>
   );
 }

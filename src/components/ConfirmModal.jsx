@@ -10,6 +10,7 @@ export default function ConfirmModal({
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   isDestructive = true,
+  icon: CustomIcon,
   onConfirm,
   onCancel,
 }) {
@@ -26,7 +27,13 @@ export default function ConfirmModal({
                 : 'bg-amber-100 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400'
             }`}
           >
-            {isDestructive ? <Trash2 className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+            {CustomIcon ? (
+              <CustomIcon className="h-5 w-5" />
+            ) : isDestructive ? (
+              <Trash2 className="h-5 w-5" />
+            ) : (
+              <AlertTriangle className="h-5 w-5" />
+            )}
           </div>
 
           <div className="flex-1">
