@@ -4,7 +4,9 @@ import crypto from 'crypto';
 import { sanitizeFilename } from './validator.js';
 import { MIME_TYPE_MAP } from './constants.js';
 
-const STORAGE_ROOT = path.join(process.cwd(), 'data', 'media');
+const STORAGE_ROOT = process.env.VERCEL
+  ? path.join('/tmp', 'data', 'media')
+  : path.join(process.cwd(), 'data', 'media');
 
 if (!fs.existsSync(STORAGE_ROOT)) {
   fs.mkdirSync(STORAGE_ROOT, { recursive: true });

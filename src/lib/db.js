@@ -4,7 +4,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { SUPPORTED_LANGUAGES } from './constants.js';
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = process.env.VERCEL ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'platform.db');
 
 if (!fs.existsSync(DATA_DIR)) {
