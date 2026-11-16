@@ -74,10 +74,13 @@ async function runTests() {
 
   // TEST 3: Admin Login & Authentication
   console.log('\n--- Test 3: Administrator Login & Session ---');
+  const testUser = process.env.ADMIN_USERNAME || 'test_admin_runner';
+  const testPass = process.env.ADMIN_PASSWORD || 'test_secure_pass_9876';
+
   const loginRes = await fetch(`${BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ username: 'admin', password: 'admin1234' }),
+    body: JSON.stringify({ username: testUser, password: testPass }),
   });
   assert(loginRes.status === 200, 'Admin login with valid credentials succeeds with HTTP 200');
   const cookieHeader = loginRes.headers.get('set-cookie');
@@ -246,9 +249,19 @@ async function runTests() {
   console.log('======================================================\n');
 }
 
+const testUser = process.env.ADMIN_USERNAME || 'test_admin_runner';
+const testPass = process.env.ADMIN_PASSWORD || 'test_secure_pass_9876';
+
 const nextProcess = spawn(process.execPath, ['./node_modules/next/dist/bin/next', 'start', '-H', '127.0.0.1', '-p', PORT.toString()], {
   stdio: 'inherit',
-  env: { ...process.env, NODE_ENV: 'production', PORT: PORT.toString(), PUBLIC_URL: BASE_URL },
+  env: {
+    ...process.env,
+    NODE_ENV: 'production',
+    PORT: PORT.toString(),
+    PUBLIC_URL: BASE_URL,
+    ADMIN_USERNAME: testUser,
+    ADMIN_PASSWORD: testPass,
+  },
 });
 
 nextProcess.on('error', (err) => {

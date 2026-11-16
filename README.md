@@ -61,10 +61,17 @@ Built with **Next.js 14 (App Router, 100% Pure JavaScript/JSX)**, **Tailwind CSS
    ```
 
 3. Setup environment variables:
-   ```bash
-   cp .env.example .env.local
+   Create a `.env.local` file with your configuration:
+   ```ini
+   NEXT_PUBLIC_APP_URL=http://localhost:3000
+   ADMIN_USERNAME=your_chosen_username
+   ADMIN_PASSWORD=your_chosen_secure_password
+   ADMIN_SECRET=your_random_secret_hmac_key
+   # Supabase credentials (optional for cloud database/storage)
+   NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_or_publishable_key
+   SUPABASE_SERVICE_ROLE_KEY=your_service_role_secret
    ```
-   *Configure your desired administrator credentials and secret key in `.env.local`.*
 
 4. Run the development server:
    ```bash

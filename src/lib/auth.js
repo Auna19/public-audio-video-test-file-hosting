@@ -2,9 +2,7 @@ import crypto from 'crypto';
 import { cookies } from 'next/headers';
 
 const SESSION_COOKIE_NAME = 'auth_session_token';
-const AUTH_SECRET = process.env.ADMIN_SECRET || 'dev_secret_super_secure_key_1234567890';
-const DEFAULT_ADMIN_USER = process.env.ADMIN_USERNAME || 'admin';
-const DEFAULT_ADMIN_PASS = process.env.ADMIN_PASSWORD || 'admin1234';
+const AUTH_SECRET = process.env.ADMIN_SECRET || 'platform_admin_session_hmac_secret_key_987654321';
 
 export function signToken(username) {
   const payload = JSON.stringify({
@@ -48,7 +46,25 @@ export function verifyToken(token) {
 }
 
 export function validateCredentials(user, pass) {
-  return user === DEFAULT_ADMIN_USER && pass === DEFAULT_ADMIN_PASS;
+  const expectedUser = process.env.ADMIN_USERNAME ? process.env.ADMIN_USERNAME.trim() : '';
+  const expectedPass = process.env.ADMIN_PASSWORD ? process.env.ADMIN_PASSWORD.trim() : '';
+
+  // If no credentials configured in environment variables, deny access by default
+  if (!expectedUser || !expectedPass) {
+    return false;
+  }
+
+  // Constant-time length and byte comparison to prevent timing attacks
+  const uBuf = Buffer.from(String(user));
+  const euBuf = Buffer.from(String(expectedUser));
+  const pBuf = Buffer.from(String(pass));
+  const epBuf = Buffer.from(String(expectedPass));
+
+  if (uBuf.length !== euBuf.length || pBuf.length !== epBuf.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(uBuf, euBuf) && crypto.timingSafeEqual(pBuf, epBuf);
 }
 
 export async function getAuthenticatedAdmin() {
