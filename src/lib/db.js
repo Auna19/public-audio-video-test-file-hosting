@@ -306,6 +306,12 @@ export const languageRepo = {
       fileCount: 0,
       createdAt: now,
     };
+  },
+
+  delete(code) {
+    const db = getDb();
+    const res = db.prepare(`DELETE FROM languages WHERE code = ?`).run(code.toLowerCase().trim());
+    return res.changes > 0;
   }
 };
 
@@ -327,5 +333,10 @@ export const auditRepo = {
   getRecent(limit = 50) {
     const db = getDb();
     return db.prepare(`SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?`).all(limit);
+  },
+
+  clear() {
+    const db = getDb();
+    db.prepare(`DELETE FROM audit_logs`).run();
   }
 };

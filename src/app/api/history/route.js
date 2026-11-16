@@ -18,3 +18,19 @@ export async function GET() {
     return NextResponse.json({ error: 'Failed to retrieve history logs' }, { status: 500 });
   }
 }
+
+export async function DELETE() {
+  try {
+    const admin = await getAuthenticatedAdmin();
+    if (!admin) {
+      return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
+    }
+
+    auditRepo.clear();
+    auditRepo.log('CLEAR_DATA', admin.user, { message: 'Audit history cleared by administrator' });
+    return NextResponse.json({ success: true, message: 'Audit history cleared successfully' });
+  } catch (error) {
+    console.error('Clear history error:', error);
+    return NextResponse.json({ error: 'Failed to clear history' }, { status: 500 });
+  }
+}
