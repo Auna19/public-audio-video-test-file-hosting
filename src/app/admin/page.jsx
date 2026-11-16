@@ -7,6 +7,7 @@ import MediaCard from '@/components/MediaCard.jsx';
 import ConfirmModal from '@/components/ConfirmModal.jsx';
 import EditModal from '@/components/EditModal.jsx';
 import ToastContainer from '@/components/Toast.jsx';
+import NotificationModal from '@/components/NotificationModal.jsx';
 import {
   UploadCloud,
   FileAudio,
@@ -35,6 +36,7 @@ export default function AdminDashboardPage() {
   const [selectedType, setSelectedType] = useState('all');
   const [viewMode, setViewMode] = useState('table');
   const [toasts, setToasts] = useState([]);
+  const [notification, setNotification] = useState({ isOpen: false });
 
   // Modals state
   const [deleteId, setDeleteId] = useState(null);
@@ -122,6 +124,13 @@ export default function AdminDashboardPage() {
         addToast('Media file and physical storage deleted successfully.', 'success');
         setFiles((prev) => prev.filter((f) => f.id !== deleteId));
         setStats((prev) => prev ? { ...prev, totalFiles: Math.max(0, prev.totalFiles - 1) } : null);
+        setNotification({
+          isOpen: true,
+          type: 'success',
+          title: 'Media Deleted Successfully',
+          message: 'The media file and its physical storage record have been permanently removed.',
+          autoCloseMs: 3000,
+        });
       } else {
         addToast('Failed to delete media file.', 'error');
       }
@@ -147,6 +156,15 @@ export default function AdminDashboardPage() {
           nextPublic ? 'Public access enabled for this file.' : 'Public access disabled (URL now blocked).',
           'info'
         );
+        setNotification({
+          isOpen: true,
+          type: nextPublic ? 'success' : 'info',
+          title: nextPublic ? 'Public Access Enabled 🌐' : 'Public Access Disabled 🔒',
+          message: nextPublic
+            ? `"${file.title}" is now publicly visible and available for streaming/download.`
+            : `"${file.title}" is now restricted. Public access to its direct URL is blocked.`,
+          autoCloseMs: 3000,
+        });
       }
     } catch {
       addToast('Failed to update public status.', 'error');
@@ -163,14 +181,30 @@ export default function AdminDashboardPage() {
       const data = await res.json();
       setFiles((prev) => prev.map((f) => (f.id === id ? data.file : f)));
       addToast('Media details updated successfully.', 'success');
+      setNotification({
+        isOpen: true,
+        type: 'success',
+        title: 'Media Details Updated ✍️',
+        message: 'Your metadata changes (title, description, tags, language) were saved successfully.',
+        autoCloseMs: 3000,
+      });
     } else {
       addToast('Failed to update media file.', 'error');
     }
   };
 
-  const copyUrl = (url) => {
+  const copyUrl = (url, title = 'media file') => {
+    if (!url) return;
     navigator.clipboard.writeText(url);
     addToast('Direct file URL copied successfully!', 'success');
+    setNotification({
+      isOpen: true,
+      type: 'copy',
+      title: 'Direct Link Copied! 📋',
+      message: `The direct URL for "${title}" has been copied to your clipboard.`,
+      copyUrl: url,
+      autoCloseMs: 3500,
+    });
   };
 
   const formatFileSize = (bytes) => {
@@ -382,7 +416,7 @@ export default function AdminDashboardPage() {
                   onDelete={(id) => setDeleteId(id)}
                   onEdit={(f) => setEditingFile(f)}
                   onTogglePublic={(f) => handleTogglePublic(f)}
-                  onCopySuccess={(msg) => addToast(msg, 'success')}
+                  onCopySuccess={(url, f) => copyUrl(url, f?.title || file.title)}
                 />
               ))}
             </div>
@@ -464,7 +498,7 @@ export default function AdminDashboardPage() {
                         <div className="flex items-center justify-end gap-1.5">
                           <button
                             type="button"
-                            onClick={() => copyUrl(file.public_url)}
+                            onClick={() => copyUrl(file.public_url, file.title)}
                             className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 transition shadow-2xs"
                             title="Copy direct media URL"
                           >
@@ -536,6 +570,18 @@ export default function AdminDashboardPage() {
       />
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      <NotificationModal
+        isOpen={notification.isOpen}
+        onClose={() => setNotification({ isOpen: false })}
+        type={notification.type}
+        title={notification.title}
+        message={notification.message}
+        copyUrl={notification.copyUrl}
+        primaryAction={notification.primaryAction}
+        secondaryAction={notification.secondaryAction}
+        autoCloseMs={notification.autoCloseMs}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import ToastContainer from '@/components/Toast.jsx';
+import NotificationModal from '@/components/NotificationModal.jsx';
 import {
   UploadCloud,
   FileAudio,
@@ -28,6 +29,7 @@ export default function AdminUploadPage() {
   const [defaultLanguage, setDefaultLanguage] = useState('ha');
   const [isBulkUploading, setIsBulkUploading] = useState(false);
   const [toasts, setToasts] = useState([]);
+  const [notification, setNotification] = useState({ isOpen: false });
 
   const addToast = (message, type = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -154,6 +156,25 @@ export default function AdminUploadPage() {
         publicUrl: data.file.public_url,
       });
       addToast(`Successfully uploaded "${item.title}"! Public URL ready.`, 'success');
+
+      // Trigger notification modal for single upload if not bulk uploading
+      if (!isBulkUploading) {
+        setNotification({
+          isOpen: true,
+          type: 'success',
+          title: 'Media Upload Complete! 🎉',
+          message: `"${item.title}" has been successfully uploaded and registered in the media library.`,
+          copyUrl: data.file.public_url,
+          primaryAction: {
+            label: 'View in Media Manager',
+            onClick: () => router.push('/admin/media'),
+          },
+          secondaryAction: {
+            label: 'Continue Uploading',
+            onClick: () => setNotification({ isOpen: false }),
+          },
+        });
+      }
       return true;
     } catch (err) {
       updateItem(item.id, {
@@ -182,12 +203,36 @@ export default function AdminUploadPage() {
 
     setIsBulkUploading(false);
     addToast('Batch upload process completed!', 'success');
+
+    // Show Batch Completion Notification Modal
+    setNotification({
+      isOpen: true,
+      type: 'success',
+      title: 'Batch Upload Complete! 🚀',
+      message: `All ${pendingItems.length} queued media files have been uploaded and published to the cloud library.`,
+      primaryAction: {
+        label: 'Go to Media Manager',
+        onClick: () => router.push('/admin/media'),
+      },
+      secondaryAction: {
+        label: 'Upload More',
+        onClick: () => setNotification({ isOpen: false }),
+      },
+    });
   };
 
-  const copyUrl = (url) => {
+  const copyUrl = (url, title = 'media file') => {
     if (!url) return;
     navigator.clipboard.writeText(url);
     addToast('Direct file URL copied successfully!', 'success');
+    setNotification({
+      isOpen: true,
+      type: 'copy',
+      title: 'Direct Link Copied! 📋',
+      message: `The direct URL for "${title}" has been copied to your clipboard.`,
+      copyUrl: url,
+      autoCloseMs: 3500,
+    });
   };
 
   const formatFileSize = (bytes) => {
@@ -598,6 +643,18 @@ export default function AdminUploadPage() {
       </main>
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      <NotificationModal
+        isOpen={notification.isOpen}
+        onClose={() => setNotification({ isOpen: false })}
+        type={notification.type}
+        title={notification.title}
+        message={notification.message}
+        copyUrl={notification.copyUrl}
+        primaryAction={notification.primaryAction}
+        secondaryAction={notification.secondaryAction}
+        autoCloseMs={notification.autoCloseMs}
+      />
     </div>
   );
 }

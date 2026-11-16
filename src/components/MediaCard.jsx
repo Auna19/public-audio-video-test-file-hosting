@@ -57,7 +57,7 @@ export default function MediaCard({
       await navigator.clipboard.writeText(file.public_url);
       setCopied(true);
       if (onCopySuccess) {
-        onCopySuccess('Direct file URL copied successfully!');
+        onCopySuccess(file.public_url, file);
       }
       setTimeout(() => setCopied(false), 2500);
     } catch (err) {

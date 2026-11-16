@@ -3,14 +3,26 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar.jsx';
-import { Lock, User, KeyRound, ArrowRight, ShieldCheck, AlertCircle } from 'lucide-react';
+import NotificationModal from '@/components/NotificationModal.jsx';
+import {
+  Lock,
+  User,
+  KeyRound,
+  ArrowRight,
+  ShieldCheck,
+  AlertCircle,
+  Eye,
+  EyeOff,
+} from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [modalConfig, setModalConfig] = useState({ isOpen: false });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -30,8 +42,26 @@ export default function LoginPage() {
         return;
       }
 
-      router.push('/admin');
-      router.refresh();
+      // Show high-priority login success modal
+      setModalConfig({
+        isOpen: true,
+        type: 'auth',
+        title: 'Authentication Successful! 🎉',
+        message: `Welcome back, ${data.user || username}! Your administrator session has been verified and signed.`,
+        primaryAction: {
+          label: 'Go to Dashboard',
+          onClick: () => {
+            router.push('/admin');
+            router.refresh();
+          },
+        },
+        autoCloseMs: 2000,
+      });
+
+      setTimeout(() => {
+        router.push('/admin');
+        router.refresh();
+      }, 1500);
     } catch (err) {
       setError(err?.message || 'Network error occurred during login');
     } finally {
@@ -89,13 +119,26 @@ export default function LoginPage() {
               <div className="relative">
                 <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 pl-10 pr-4 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 pl-10 pr-11 py-2.5 text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 focus:outline-none transition"
+                  title={showPassword ? 'Mask password' : 'Unmask password'}
+                  aria-label={showPassword ? 'Mask password' : 'Unmask password'}
+                >
+                  {showPassword ? (
+                    <EyeOff className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
               </div>
             </div>
 
@@ -116,6 +159,17 @@ export default function LoginPage() {
           </form>
         </div>
       </main>
+
+      {/* Notification Modal on Successful Login */}
+      <NotificationModal
+        isOpen={modalConfig.isOpen}
+        onClose={() => setModalConfig({ isOpen: false })}
+        type={modalConfig.type}
+        title={modalConfig.title}
+        message={modalConfig.message}
+        primaryAction={modalConfig.primaryAction}
+        autoCloseMs={modalConfig.autoCloseMs}
+      />
     </div>
   );
 }

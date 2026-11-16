@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Navbar from '@/components/Navbar.jsx';
 import MediaCard from '@/components/MediaCard.jsx';
 import ToastContainer from '@/components/Toast.jsx';
+import NotificationModal from '@/components/NotificationModal.jsx';
 import {
   Search,
   Filter,
@@ -26,6 +27,19 @@ export default function PublicLibraryPage() {
   const [selectedExt, setSelectedExt] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
   const [toasts, setToasts] = useState([]);
+  const [notification, setNotification] = useState({ isOpen: false });
+
+  const handleCopyLink = (url, file) => {
+    addToast('Direct file URL copied successfully!', 'success');
+    setNotification({
+      isOpen: true,
+      type: 'copy',
+      title: 'Direct Link Copied! 📋',
+      message: `The direct streaming link for "${file?.title || 'media file'}" has been copied to your clipboard.`,
+      copyUrl: url,
+      autoCloseMs: 4000,
+    });
+  };
 
   const addToast = (message, type = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -283,7 +297,7 @@ export default function PublicLibraryPage() {
                       key={file.id}
                       file={file}
                       isAdmin={false}
-                      onCopySuccess={(msg) => addToast(msg, 'success')}
+                      onCopySuccess={(url, f) => handleCopyLink(url, f)}
                     />
                   ))}
                 </div>
@@ -294,6 +308,18 @@ export default function PublicLibraryPage() {
       </main>
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
+
+      <NotificationModal
+        isOpen={notification.isOpen}
+        onClose={() => setNotification({ isOpen: false })}
+        type={notification.type}
+        title={notification.title}
+        message={notification.message}
+        copyUrl={notification.copyUrl}
+        primaryAction={notification.primaryAction}
+        secondaryAction={notification.secondaryAction}
+        autoCloseMs={notification.autoCloseMs}
+      />
     </div>
   );
 }
