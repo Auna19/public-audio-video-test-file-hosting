@@ -34,13 +34,7 @@ async function handleMediaRequest(req, pathSegments, isHeadOnly) {
     }
 
     const storagePath = pathSegments.join('/');
-    const fullDiskPath = storageEngine.getFullDiskPath(storagePath);
-
-    if (!fs.existsSync(fullDiskPath)) {
-      return new NextResponse('Media file not found', { status: 404 });
-    }
-
-    const record = mediaRepo.findByStoragePath(storagePath);
+    const record = await mediaRepo.findByStoragePath(storagePath);
 
     if (record && record.is_public === 0) {
       return new NextResponse('This media file is private or access has been disabled', {
@@ -48,18 +42,30 @@ async function handleMediaRequest(req, pathSegments, isHeadOnly) {
       });
     }
 
+    const url = req.nextUrl ? req.nextUrl : new URL(req.url, 'http://localhost:3000');
+    const isDownload = url.searchParams.get('download') === '1' || url.searchParams.get('dl') === '1';
+
+    if (isDownload && !isHeadOnly && record) {
+      await mediaRepo.incrementDownload(record.id);
+    }
+
+    const fullDiskPath = storageEngine.getFullDiskPath(storagePath);
+    const hasLocalFile = fs.existsSync(fullDiskPath);
+
+    // If file is not on local disk (e.g. running on Vercel), redirect to Supabase CDN URL
+    if (!hasLocalFile) {
+      const supabaseUrl = storageEngine.getSupabasePublicUrl(storagePath);
+      if (supabaseUrl) {
+        return NextResponse.redirect(supabaseUrl, { status: 307 });
+      }
+      return new NextResponse('Media file not found', { status: 404 });
+    }
+
     const stat = await fs.promises.stat(fullDiskPath);
     const totalSize = stat.size;
     const ext = path.extname(storagePath).toLowerCase();
     const mimeType = record?.mime_type || MIME_TYPE_MAP[ext] || 'application/octet-stream';
     const originalFileName = record?.original_file_name || path.basename(storagePath);
-
-    const url = req.nextUrl ? req.nextUrl : new URL(req.url, 'http://localhost:3000');
-    const isDownload = url.searchParams.get('download') === '1' || url.searchParams.get('dl') === '1';
-
-    if (isDownload && !isHeadOnly && record) {
-      mediaRepo.incrementDownload(record.id);
-    }
 
     const dispositionType = isDownload ? 'attachment' : 'inline';
     const contentDisposition = `${dispositionType}; filename="${encodeURIComponent(originalFileName)}"`;
@@ -99,7 +105,6 @@ async function handleMediaRequest(req, pathSegments, isHeadOnly) {
         });
       }
 
-      // Clamp end to file size
       if (isNaN(end) || end >= totalSize) {
         end = totalSize - 1;
       }

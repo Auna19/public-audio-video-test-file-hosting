@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(req, { params }) {
   try {
-    const file = mediaRepo.findById(params.id);
+    const file = await mediaRepo.findById(params.id);
     if (!file) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
@@ -21,7 +21,9 @@ export async function GET(req, { params }) {
     const baseUrl = getPublicBaseUrl(req);
     const normalizedFile = {
       ...file,
-      public_url: `${baseUrl}/api/media/file/${file.storage_path}`,
+      public_url: file.public_url && file.public_url.startsWith('http')
+        ? file.public_url
+        : `${baseUrl}/api/media/file/${file.storage_path}`,
     };
 
     return NextResponse.json({ file: normalizedFile });
@@ -38,7 +40,7 @@ export async function PATCH(req, { params }) {
     }
 
     const body = await req.json();
-    const existing = mediaRepo.findById(params.id);
+    const existing = await mediaRepo.findById(params.id);
     if (!existing) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
@@ -66,8 +68,8 @@ export async function PATCH(req, { params }) {
       }
     }
 
-    const updated = mediaRepo.update(params.id, updates);
-    auditRepo.log('UPDATE_MEDIA', params.id, updates);
+    const updated = await mediaRepo.update(params.id, updates);
+    await auditRepo.log('UPDATE_MEDIA', params.id, updates);
 
     return NextResponse.json({ success: true, file: updated });
   } catch (error) {
@@ -83,15 +85,15 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
     }
 
-    const existing = mediaRepo.findById(params.id);
+    const existing = await mediaRepo.findById(params.id);
     if (!existing) {
       return NextResponse.json({ error: 'File not found' }, { status: 404 });
     }
 
     await storageEngine.deleteFile(existing.storage_path);
-    mediaRepo.delete(params.id);
+    await mediaRepo.delete(params.id);
 
-    auditRepo.log('DELETE_MEDIA', params.id, {
+    await auditRepo.log('DELETE_MEDIA', params.id, {
       title: existing.title,
       storagePath: existing.storage_path,
     });

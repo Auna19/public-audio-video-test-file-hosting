@@ -1,9 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import Navbar from '@/components/Navbar.jsx';
 import MediaCard from '@/components/MediaCard.jsx';
 import ConfirmModal from '@/components/ConfirmModal.jsx';
 import EditModal from '@/components/EditModal.jsx';
@@ -53,46 +52,64 @@ export default function AdminDashboardPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  const checkAuthAndLoad = async () => {
+  const fetchStats = useCallback(async () => {
     try {
-      setLoading(true);
-      const authRes = await fetch('/api/auth/me');
-      if (!authRes.ok) {
-        router.push('/login');
-        return;
-      }
-
-      const statsRes = await fetch('/api/stats');
+      const statsRes = await fetch('/api/stats', { cache: 'no-store' });
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
       }
+    } catch (err) {
+      console.error('Failed to load stats:', err);
+    }
+  }, []);
 
+  const loadMedia = useCallback(async () => {
+    try {
+      setLoading(true);
       const params = new URLSearchParams({
         scope: 'admin',
         language: selectedLang,
         mediaType: selectedType,
         search,
       });
-      const filesRes = await fetch(`/api/media?${params.toString()}`);
+      const filesRes = await fetch(`/api/media?${params.toString()}`, { cache: 'no-store' });
       if (filesRes.ok) {
         const filesData = await filesRes.json();
         setFiles(filesData.files || []);
       }
     } catch (err) {
-      console.error('Failed to load dashboard data:', err);
+      console.error('Failed to load media files:', err);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedLang, selectedType, search]);
+
+  const checkAuthAndLoad = useCallback(async () => {
+    try {
+      const authRes = await fetch('/api/auth/me');
+      if (!authRes.ok) {
+        router.push('/login');
+        return;
+      }
+      await Promise.all([fetchStats(), loadMedia()]);
+    } catch (err) {
+      console.error('Failed to load dashboard data:', err);
+    }
+  }, [fetchStats, loadMedia, router]);
 
   useEffect(() => {
     checkAuthAndLoad();
+    // Fast polling every 10 seconds to keep metrics always updated in real time
+    const interval = setInterval(() => {
+      fetchStats();
+    }, 10000);
+    return () => clearInterval(interval);
   }, [selectedLang, selectedType]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      checkAuthAndLoad();
+      loadMedia();
     }, 300);
     return () => clearTimeout(timer);
   }, [search]);
@@ -177,8 +194,6 @@ export default function AdminDashboardPage() {
 
   return (
     <div className="min-h-screen bg-slate-50/70 dark:bg-slate-950 flex flex-col">
-      <Navbar />
-
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Top Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">

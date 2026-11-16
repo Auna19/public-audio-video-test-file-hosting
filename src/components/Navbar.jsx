@@ -19,6 +19,7 @@ export default function Navbar() {
   const [isAdmin, setIsAdmin] = useState(false);
 
   useEffect(() => {
+    if (pathname?.startsWith('/admin')) return;
     fetch('/api/auth/me')
       .then((res) => {
         if (res.ok) return res.json();
@@ -29,6 +30,10 @@ export default function Navbar() {
       })
       .catch(() => setIsAdmin(false));
   }, [pathname]);
+
+  if (pathname?.startsWith('/admin')) {
+    return null;
+  }
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' });

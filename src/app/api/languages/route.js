@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const languages = languageRepo.findAll();
+    const languages = await languageRepo.findAll();
     return NextResponse.json({ languages });
   } catch (error) {
     console.error('Languages fetch error:', error);
@@ -28,14 +28,14 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Language code and name are required' }, { status: 400 });
     }
 
-    const created = languageRepo.create({
+    const created = await languageRepo.create({
       code,
       name,
       nativeName,
       badgeColor,
     });
 
-    auditRepo.log('CREATE_LANGUAGE', code, { name, code });
+    await auditRepo.log('CREATE_LANGUAGE', code, { name, code });
 
     return NextResponse.json({ success: true, language: created });
   } catch (error) {
@@ -58,7 +58,7 @@ export async function DELETE(req) {
       return NextResponse.json({ error: 'Language code is required' }, { status: 400 });
     }
 
-    const files = mediaRepo.findAll({ language: code });
+    const files = await mediaRepo.findAll({ language: code });
     if (files.length > 0) {
       return NextResponse.json(
         { error: `Cannot delete language: ${files.length} media file(s) are associated with it` },
@@ -66,7 +66,7 @@ export async function DELETE(req) {
       );
     }
 
-    const deleted = languageRepo.delete(code);
+    const deleted = await languageRepo.delete(code);
     if (!deleted) {
       return NextResponse.json({ error: 'Language not found' }, { status: 404 });
     }

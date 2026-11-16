@@ -19,7 +19,7 @@ export async function GET(req) {
     const admin = await getAuthenticatedAdmin();
     const onlyPublic = !admin || searchParams.get('scope') === 'public';
 
-    const files = mediaRepo.findAll({
+    const files = await mediaRepo.findAll({
       language,
       mediaType,
       search,
@@ -111,8 +111,8 @@ export async function POST(req) {
       uploaded_by: admin.user,
     };
 
-    const created = mediaRepo.create(record);
-    auditRepo.log('UPLOAD_MEDIA', id, { title: finalTitle, storagePath: stored.storagePath });
+    const created = await mediaRepo.create(record);
+    await auditRepo.log('UPLOAD_MEDIA', id, { title: finalTitle, storagePath: stored.storagePath });
 
     return NextResponse.json({
       success: true,

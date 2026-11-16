@@ -3,12 +3,15 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { SUPPORTED_LANGUAGES } from './constants.js';
+import { supabaseAdmin, isSupabaseConfigured } from './supabase.js';
 
 const DATA_DIR = process.env.VERCEL ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'platform.db');
 
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch {}
 }
 
 let dbInstance = null;
@@ -22,281 +25,497 @@ export function getDb() {
 }
 
 function initSchema(db) {
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    PRAGMA synchronous = NORMAL;
-    PRAGMA foreign_keys = ON;
+  try {
+    db.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
+      PRAGMA foreign_keys = ON;
 
-    CREATE TABLE IF NOT EXISTS media_files (
-      id TEXT PRIMARY KEY,
-      title TEXT NOT NULL,
-      original_file_name TEXT NOT NULL,
-      storage_path TEXT NOT NULL,
-      public_url TEXT NOT NULL,
-      language TEXT NOT NULL,
-      language_code TEXT NOT NULL,
-      media_type TEXT NOT NULL,
-      file_extension TEXT NOT NULL,
-      mime_type TEXT NOT NULL,
-      file_size INTEGER NOT NULL,
-      description TEXT,
-      tags TEXT,
-      upload_status TEXT NOT NULL DEFAULT 'completed',
-      is_public INTEGER NOT NULL DEFAULT 1,
-      download_count INTEGER NOT NULL DEFAULT 0,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL,
-      uploaded_by TEXT DEFAULT 'admin'
-    );
+      CREATE TABLE IF NOT EXISTS media_files (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        original_file_name TEXT NOT NULL,
+        storage_path TEXT NOT NULL,
+        public_url TEXT NOT NULL,
+        language TEXT NOT NULL,
+        language_code TEXT NOT NULL,
+        media_type TEXT NOT NULL,
+        file_extension TEXT NOT NULL,
+        mime_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        description TEXT,
+        tags TEXT,
+        upload_status TEXT NOT NULL DEFAULT 'completed',
+        is_public INTEGER NOT NULL DEFAULT 1,
+        download_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        uploaded_by TEXT DEFAULT 'admin'
+      );
 
-    CREATE INDEX IF NOT EXISTS idx_media_language ON media_files(language_code);
-    CREATE INDEX IF NOT EXISTS idx_media_type ON media_files(media_type);
-    CREATE INDEX IF NOT EXISTS idx_media_is_public ON media_files(is_public);
-    CREATE INDEX IF NOT EXISTS idx_media_created ON media_files(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_media_language ON media_files(language_code);
+      CREATE INDEX IF NOT EXISTS idx_media_type ON media_files(media_type);
+      CREATE INDEX IF NOT EXISTS idx_media_is_public ON media_files(is_public);
+      CREATE INDEX IF NOT EXISTS idx_media_created ON media_files(created_at DESC);
 
-    CREATE TABLE IF NOT EXISTS languages (
-      code TEXT PRIMARY KEY,
-      name TEXT NOT NULL,
-      native_name TEXT,
-      badge_color TEXT,
-      created_at TEXT NOT NULL
-    );
+      CREATE TABLE IF NOT EXISTS languages (
+        code TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        native_name TEXT,
+        badge_color TEXT,
+        created_at TEXT NOT NULL
+      );
 
-    CREATE TABLE IF NOT EXISTS admin_users (
-      id TEXT PRIMARY KEY,
-      username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL
-    );
+      CREATE TABLE IF NOT EXISTS admin_users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
 
-    CREATE TABLE IF NOT EXISTS audit_logs (
-      id TEXT PRIMARY KEY,
-      action TEXT NOT NULL,
-      target_id TEXT,
-      details TEXT,
-      timestamp TEXT NOT NULL
-    );
-  `);
-
-  // Seed default languages if table is empty
-  const countRow = db.prepare(`SELECT COUNT(*) as count FROM languages`).get();
-  if (countRow.count === 0) {
-    const insertLang = db.prepare(`
-      INSERT INTO languages (code, name, native_name, badge_color, created_at)
-      VALUES (?, ?, ?, ?, ?)
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id TEXT PRIMARY KEY,
+        action TEXT NOT NULL,
+        target_id TEXT,
+        details TEXT,
+        timestamp TEXT NOT NULL
+      );
     `);
-    const now = new Date().toISOString();
-    for (const lang of SUPPORTED_LANGUAGES) {
-      insertLang.run(lang.code, lang.name, lang.nativeName || '', lang.badgeColor, now);
+
+    // Seed default languages if table is empty
+    const countRow = db.prepare(`SELECT COUNT(*) as count FROM languages`).get();
+    if (countRow.count === 0) {
+      const insertLang = db.prepare(`
+        INSERT INTO languages (code, name, native_name, badge_color, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `);
+      const now = new Date().toISOString();
+      for (const lang of SUPPORTED_LANGUAGES) {
+        insertLang.run(lang.code, lang.name, lang.nativeName || '', lang.badgeColor, now);
+      }
     }
+  } catch (err) {
+    console.error('Error initializing SQLite schema:', err);
   }
 }
 
 export const mediaRepo = {
-  findAll(options = {}) {
-    const db = getDb();
-    let query = `SELECT * FROM media_files WHERE 1=1`;
-    const params = [];
+  async findAll(options = {}) {
+    // 1. If Supabase configured, query Supabase
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        let q = supabaseAdmin.from('media_files').select('*');
 
-    if (options.onlyPublic) {
-      query += ` AND is_public = 1`;
+        if (options.onlyPublic) {
+          q = q.eq('is_public', 1);
+        }
+        if (options.language && options.language !== 'all') {
+          q = q.eq('language_code', options.language);
+        }
+        if (options.mediaType && options.mediaType !== 'all') {
+          q = q.eq('media_type', options.mediaType);
+        }
+        if (options.search && options.search.trim()) {
+          const term = `%${options.search.trim()}%`;
+          q = q.or(`title.ilike.${term},description.ilike.${term},tags.ilike.${term},original_file_name.ilike.${term}`);
+        }
+
+        switch (options.sort) {
+          case 'oldest':
+            q = q.order('created_at', { ascending: true });
+            break;
+          case 'size_desc':
+            q = q.order('file_size', { ascending: false });
+            break;
+          case 'downloads_desc':
+            q = q.order('download_count', { ascending: false }).order('created_at', { ascending: false });
+            break;
+          case 'newest':
+          default:
+            q = q.order('created_at', { ascending: false });
+            break;
+        }
+
+        const { data, error } = await q;
+        if (!error && Array.isArray(data)) {
+          return data;
+        }
+        if (error) {
+          console.warn('Supabase media findAll fallback to SQLite:', error.message);
+        }
+      } catch (err) {
+        console.warn('Supabase media findAll exception:', err.message);
+      }
     }
 
-    if (options.language && options.language !== 'all') {
-      query += ` AND language_code = ?`;
-      params.push(options.language);
-    }
+    // 2. Fallback to SQLite
+    try {
+      const db = getDb();
+      let query = `SELECT * FROM media_files WHERE 1=1`;
+      const params = [];
 
-    if (options.mediaType && options.mediaType !== 'all') {
-      query += ` AND media_type = ?`;
-      params.push(options.mediaType);
-    }
+      if (options.onlyPublic) {
+        query += ` AND is_public = 1`;
+      }
+      if (options.language && options.language !== 'all') {
+        query += ` AND language_code = ?`;
+        params.push(options.language);
+      }
+      if (options.mediaType && options.mediaType !== 'all') {
+        query += ` AND media_type = ?`;
+        params.push(options.mediaType);
+      }
+      if (options.search && options.search.trim()) {
+        query += ` AND (title LIKE ? OR description LIKE ? OR tags LIKE ? OR original_file_name LIKE ?)`;
+        const term = `%${options.search.trim()}%`;
+        params.push(term, term, term, term);
+      }
 
-    if (options.search && options.search.trim()) {
-      query += ` AND (title LIKE ? OR description LIKE ? OR tags LIKE ? OR original_file_name LIKE ?)`;
-      const term = `%${options.search.trim()}%`;
-      params.push(term, term, term, term);
-    }
+      switch (options.sort) {
+        case 'oldest':
+          query += ` ORDER BY created_at ASC`;
+          break;
+        case 'size_desc':
+          query += ` ORDER BY file_size DESC`;
+          break;
+        case 'downloads_desc':
+          query += ` ORDER BY download_count DESC, created_at DESC`;
+          break;
+        case 'newest':
+        default:
+          query += ` ORDER BY created_at DESC`;
+          break;
+      }
 
-    switch (options.sort) {
-      case 'oldest':
-        query += ` ORDER BY created_at ASC`;
-        break;
-      case 'size_desc':
-        query += ` ORDER BY file_size DESC`;
-        break;
-      case 'downloads_desc':
-        query += ` ORDER BY download_count DESC, created_at DESC`;
-        break;
-      case 'newest':
-      default:
-        query += ` ORDER BY created_at DESC`;
-        break;
+      const stmt = db.prepare(query);
+      return stmt.all(...params);
+    } catch (e) {
+      console.error('SQLite findAll error:', e);
+      return [];
     }
-
-    const stmt = db.prepare(query);
-    return stmt.all(...params);
   },
 
-  findById(id) {
-    const db = getDb();
-    const stmt = db.prepare(`SELECT * FROM media_files WHERE id = ?`);
-    return stmt.get(id) || null;
+  async findById(id) {
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin.from('media_files').select('*').eq('id', id).maybeSingle();
+        if (!error && data) return data;
+      } catch {}
+    }
+    try {
+      const db = getDb();
+      const stmt = db.prepare(`SELECT * FROM media_files WHERE id = ?`);
+      return stmt.get(id) || null;
+    } catch {
+      return null;
+    }
   },
 
-  findByStoragePath(storagePath) {
-    const db = getDb();
-    const stmt = db.prepare(`SELECT * FROM media_files WHERE storage_path = ?`);
-    return stmt.get(storagePath) || null;
+  async findByStoragePath(storagePath) {
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('media_files')
+          .select('*')
+          .eq('storage_path', storagePath)
+          .maybeSingle();
+        if (!error && data) return data;
+      } catch {}
+    }
+    try {
+      const db = getDb();
+      const stmt = db.prepare(`SELECT * FROM media_files WHERE storage_path = ?`);
+      return stmt.get(storagePath) || null;
+    } catch {
+      return null;
+    }
   },
 
-  create(record) {
-    const db = getDb();
-    const stmt = db.prepare(`
-      INSERT INTO media_files (
-        id, title, original_file_name, storage_path, public_url,
-        language, language_code, media_type, file_extension, mime_type,
-        file_size, description, tags, upload_status, is_public,
-        download_count, created_at, updated_at, uploaded_by
-      ) VALUES (
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?
-      )
-    `);
+  async create(record) {
+    // 1. Supabase write
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin.from('media_files').insert(record);
+        if (error) {
+          console.error('Supabase media create error:', error);
+        }
+      } catch (err) {
+        console.error('Supabase media create exception:', err);
+      }
+    }
 
-    stmt.run(
-      record.id,
-      record.title,
-      record.original_file_name,
-      record.storage_path,
-      record.public_url,
-      record.language,
-      record.language_code,
-      record.media_type,
-      record.file_extension,
-      record.mime_type,
-      record.file_size,
-      record.description || null,
-      record.tags || null,
-      record.upload_status || 'completed',
-      record.is_public ?? 1,
-      record.download_count ?? 0,
-      record.created_at,
-      record.updated_at,
-      record.uploaded_by || 'admin'
-    );
+    // 2. Local SQLite write
+    try {
+      const db = getDb();
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO media_files (
+          id, title, original_file_name, storage_path, public_url,
+          language, language_code, media_type, file_extension, mime_type,
+          file_size, description, tags, upload_status, is_public,
+          download_count, created_at, updated_at, uploaded_by
+        ) VALUES (
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?
+        )
+      `);
+
+      stmt.run(
+        record.id,
+        record.title,
+        record.original_file_name,
+        record.storage_path,
+        record.public_url,
+        record.language,
+        record.language_code,
+        record.media_type,
+        record.file_extension,
+        record.mime_type,
+        record.file_size,
+        record.description || null,
+        record.tags || null,
+        record.upload_status || 'completed',
+        record.is_public ?? 1,
+        record.download_count ?? 0,
+        record.created_at,
+        record.updated_at,
+        record.uploaded_by || 'admin'
+      );
+    } catch (e) {
+      console.warn('SQLite media create warning:', e.message);
+    }
 
     return record;
   },
 
-  update(id, updates = {}) {
-    const db = getDb();
-    const current = this.findById(id);
-    if (!current) return null;
+  async update(id, updates = {}) {
+    const now = new Date().toISOString();
+    const updatePayload = { ...updates, updated_at: now };
 
-    const fields = [];
-    const values = [];
-
-    const allowedKeys = [
-      'title',
-      'language',
-      'language_code',
-      'description',
-      'tags',
-      'is_public',
-      'download_count',
-      'upload_status',
-    ];
-
-    for (const key of allowedKeys) {
-      if (updates[key] !== undefined) {
-        fields.push(`${key} = ?`);
-        values.push(updates[key]);
+    // Supabase update
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('media_files').update(updatePayload).eq('id', id);
+      } catch (err) {
+        console.error('Supabase media update error:', err);
       }
     }
 
-    if (fields.length === 0) return current;
+    // SQLite update
+    try {
+      const db = getDb();
+      const fields = [];
+      const values = [];
 
-    fields.push(`updated_at = ?`);
-    values.push(new Date().toISOString());
+      const allowedKeys = [
+        'title',
+        'language',
+        'language_code',
+        'description',
+        'tags',
+        'is_public',
+        'download_count',
+        'upload_status',
+      ];
 
-    values.push(id);
-    const sql = `UPDATE media_files SET ${fields.join(', ')} WHERE id = ?`;
-    db.prepare(sql).run(...values);
+      for (const key of allowedKeys) {
+        if (updates[key] !== undefined) {
+          fields.push(`${key} = ?`);
+          values.push(updates[key]);
+        }
+      }
 
-    return this.findById(id);
+      if (fields.length > 0) {
+        fields.push(`updated_at = ?`);
+        values.push(now);
+        values.push(id);
+        db.prepare(`UPDATE media_files SET ${fields.join(', ')} WHERE id = ?`).run(...values);
+      }
+    } catch (e) {
+      console.warn('SQLite media update warning:', e.message);
+    }
+
+    return await this.findById(id);
   },
 
-  incrementDownload(id) {
-    const db = getDb();
-    db.prepare(`UPDATE media_files SET download_count = download_count + 1 WHERE id = ?`).run(id);
+  async incrementDownload(id) {
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data } = await supabaseAdmin.from('media_files').select('download_count').eq('id', id).maybeSingle();
+        if (data) {
+          await supabaseAdmin
+            .from('media_files')
+            .update({ download_count: (Number(data.download_count) || 0) + 1 })
+            .eq('id', id);
+        }
+      } catch {}
+    }
+    try {
+      const db = getDb();
+      db.prepare(`UPDATE media_files SET download_count = download_count + 1 WHERE id = ?`).run(id);
+    } catch {}
   },
 
-  delete(id) {
-    const db = getDb();
-    const res = db.prepare(`DELETE FROM media_files WHERE id = ?`).run(id);
-    return res.changes > 0;
+  async delete(id) {
+    let deleted = false;
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { error } = await supabaseAdmin.from('media_files').delete().eq('id', id);
+        if (!error) deleted = true;
+      } catch {}
+    }
+    try {
+      const db = getDb();
+      const res = db.prepare(`DELETE FROM media_files WHERE id = ?`).run(id);
+      if (res.changes > 0) deleted = true;
+    } catch {}
+    return deleted;
   },
 
-  getStats() {
-    const db = getDb();
-    const totalRow = db.prepare(`SELECT COUNT(*) as count FROM media_files`).get();
-    const audioRow = db.prepare(`SELECT COUNT(*) as count FROM media_files WHERE media_type = 'audio'`).get();
-    const videoRow = db.prepare(`SELECT COUNT(*) as count FROM media_files WHERE media_type = 'video'`).get();
-    const langRow = db.prepare(`SELECT COUNT(DISTINCT language_code) as count FROM media_files`).get();
-    const dlRow = db.prepare(`SELECT COALESCE(SUM(download_count), 0) as total FROM media_files`).get();
-    const recentRows = db.prepare(`SELECT * FROM media_files ORDER BY created_at DESC LIMIT 5`).all();
+  async getStats() {
+    // 1. Supabase instant stats calculation
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('media_files')
+          .select('media_type, language_code, download_count, is_public');
 
-    return {
-      totalFiles: totalRow.count,
-      totalAudio: audioRow.count,
-      totalVideo: videoRow.count,
-      totalLanguages: langRow.count,
-      totalDownloads: dlRow.total,
-      recentUploads: recentRows,
-    };
-  }
+        if (!error && Array.isArray(data)) {
+          let totalAudio = 0;
+          let totalVideo = 0;
+          let totalDownloads = 0;
+          const langSet = new Set();
+
+          for (const row of data) {
+            if (row.media_type === 'audio') totalAudio++;
+            if (row.media_type === 'video') totalVideo++;
+            if (row.language_code) langSet.add(row.language_code);
+            totalDownloads += Number(row.download_count) || 0;
+          }
+
+          return {
+            totalFiles: data.length,
+            totalAudio,
+            totalVideo,
+            totalLanguages: langSet.size,
+            totalDownloads,
+          };
+        }
+      } catch (err) {
+        console.warn('Supabase stats error, falling back to SQLite:', err.message);
+      }
+    }
+
+    // 2. High-speed single aggregated query in SQLite
+    try {
+      const db = getDb();
+      const row = db.prepare(`
+        SELECT
+          COUNT(*) as totalFiles,
+          COALESCE(SUM(CASE WHEN media_type = 'audio' THEN 1 ELSE 0 END), 0) as totalAudio,
+          COALESCE(SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END), 0) as totalVideo,
+          COUNT(DISTINCT language_code) as totalLanguages,
+          COALESCE(SUM(download_count), 0) as totalDownloads
+        FROM media_files
+      `).get();
+
+      return {
+        totalFiles: Number(row?.totalFiles) || 0,
+        totalAudio: Number(row?.totalAudio) || 0,
+        totalVideo: Number(row?.totalVideo) || 0,
+        totalLanguages: Number(row?.totalLanguages) || 0,
+        totalDownloads: Number(row?.totalDownloads) || 0,
+      };
+    } catch (e) {
+      return {
+        totalFiles: 0,
+        totalAudio: 0,
+        totalVideo: 0,
+        totalLanguages: 0,
+        totalDownloads: 0,
+      };
+    }
+  },
 };
 
 export const languageRepo = {
-  findAll() {
-    const db = getDb();
-    const rows = db.prepare(`SELECT * FROM languages ORDER BY name ASC`).all();
-    // Count files per language
-    const counts = db.prepare(`
-      SELECT language_code, COUNT(*) as file_count
-      FROM media_files
-      GROUP BY language_code
-    `).all();
+  async findAll() {
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data: langs, error: lErr } = await supabaseAdmin.from('languages').select('*').order('name');
+        const { data: media } = await supabaseAdmin.from('media_files').select('language_code');
 
-    const countMap = {};
-    for (const c of counts) {
-      countMap[c.language_code] = c.file_count;
+        if (!lErr && Array.isArray(langs)) {
+          const countMap = {};
+          if (Array.isArray(media)) {
+            for (const m of media) {
+              countMap[m.language_code] = (countMap[m.language_code] || 0) + 1;
+            }
+          }
+          return langs.map((r) => ({
+            code: r.code,
+            name: r.name,
+            nativeName: r.native_name,
+            badgeColor: r.badge_color || 'bg-slate-100 text-slate-800 border-slate-300',
+            fileCount: countMap[r.code] || 0,
+            createdAt: r.created_at,
+          }));
+        }
+      } catch {}
     }
 
-    return rows.map((r) => ({
-      code: r.code,
-      name: r.name,
-      nativeName: r.native_name,
-      badgeColor: r.badge_color || 'bg-slate-100 text-slate-800 border-slate-300',
-      fileCount: countMap[r.code] || 0,
-      createdAt: r.created_at,
-    }));
+    try {
+      const db = getDb();
+      const rows = db.prepare(`SELECT * FROM languages ORDER BY name ASC`).all();
+      const counts = db.prepare(`
+        SELECT language_code, COUNT(*) as file_count
+        FROM media_files
+        GROUP BY language_code
+      `).all();
+
+      const countMap = {};
+      for (const c of counts) {
+        countMap[c.language_code] = c.file_count;
+      }
+
+      return rows.map((r) => ({
+        code: r.code,
+        name: r.name,
+        nativeName: r.native_name,
+        badgeColor: r.badge_color || 'bg-slate-100 text-slate-800 border-slate-300',
+        fileCount: countMap[r.code] || 0,
+        createdAt: r.created_at,
+      }));
+    } catch {
+      return SUPPORTED_LANGUAGES.map((l) => ({ ...l, fileCount: 0 }));
+    }
   },
 
-  create({ code, name, nativeName, badgeColor }) {
-    const db = getDb();
+  async create({ code, name, nativeName, badgeColor }) {
     const cleanCode = code.toLowerCase().trim();
     const cleanName = name.trim();
     const color = badgeColor || 'bg-teal-100 text-teal-800 border-teal-300';
     const now = new Date().toISOString();
 
-    db.prepare(`
-      INSERT OR REPLACE INTO languages (code, name, native_name, badge_color, created_at)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(cleanCode, cleanName, nativeName ? nativeName.trim() : '', color, now);
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('languages').upsert({
+          code: cleanCode,
+          name: cleanName,
+          native_name: nativeName ? nativeName.trim() : '',
+          badge_color: color,
+        });
+      } catch {}
+    }
+
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT OR REPLACE INTO languages (code, name, native_name, badge_color, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(cleanCode, cleanName, nativeName ? nativeName.trim() : '', color, now);
+    } catch {}
 
     return {
       code: cleanCode,
@@ -308,35 +527,84 @@ export const languageRepo = {
     };
   },
 
-  delete(code) {
-    const db = getDb();
-    const res = db.prepare(`DELETE FROM languages WHERE code = ?`).run(code.toLowerCase().trim());
-    return res.changes > 0;
-  }
+  async delete(code) {
+    const cleanCode = code.toLowerCase().trim();
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('languages').delete().eq('code', cleanCode);
+      } catch {}
+    }
+    try {
+      const db = getDb();
+      const res = db.prepare(`DELETE FROM languages WHERE code = ?`).run(cleanCode);
+      return res.changes > 0;
+    } catch {
+      return false;
+    }
+  },
 };
 
 export const auditRepo = {
-  log(action, targetId = null, details = null) {
-    const db = getDb();
-    db.prepare(`
-      INSERT INTO audit_logs (id, action, target_id, details, timestamp)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(
-      crypto.randomUUID(),
-      action,
-      targetId || null,
-      details ? JSON.stringify(details) : null,
-      new Date().toISOString()
-    );
+  async log(action, targetId = null, details = null) {
+    const now = new Date().toISOString();
+    const id = crypto.randomUUID();
+
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('audit_logs').insert({
+          id,
+          action,
+          target_id: targetId ? String(targetId) : null,
+          details: details || {},
+          timestamp: now,
+        });
+      } catch {}
+    }
+
+    try {
+      const db = getDb();
+      db.prepare(`
+        INSERT INTO audit_logs (id, action, target_id, details, timestamp)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(
+        id,
+        action,
+        targetId ? String(targetId) : null,
+        details ? JSON.stringify(details) : null,
+        now
+      );
+    } catch {}
   },
 
-  getRecent(limit = 50) {
-    const db = getDb();
-    return db.prepare(`SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?`).all(limit);
+  async getRecent(limit = 50) {
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        const { data, error } = await supabaseAdmin
+          .from('audit_logs')
+          .select('*')
+          .order('timestamp', { ascending: false })
+          .limit(limit);
+        if (!error && Array.isArray(data)) return data;
+      } catch {}
+    }
+
+    try {
+      const db = getDb();
+      return db.prepare(`SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?`).all(limit);
+    } catch {
+      return [];
+    }
   },
 
-  clear() {
-    const db = getDb();
-    db.prepare(`DELETE FROM audit_logs`).run();
-  }
+  async clear() {
+    if (isSupabaseConfigured && supabaseAdmin) {
+      try {
+        await supabaseAdmin.from('audit_logs').delete().neq('action', '');
+      } catch {}
+    }
+    try {
+      const db = getDb();
+      db.prepare(`DELETE FROM audit_logs`).run();
+    } catch {}
+  },
 };

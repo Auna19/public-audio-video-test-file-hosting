@@ -11,7 +11,7 @@ export async function GET() {
       return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
     }
 
-    const logs = auditRepo.getRecent(100);
+    const logs = await auditRepo.getRecent(100);
     return NextResponse.json({ logs });
   } catch (error) {
     console.error('Audit history error:', error);
@@ -26,8 +26,8 @@ export async function DELETE() {
       return NextResponse.json({ error: 'Unauthorized: Admin access required' }, { status: 401 });
     }
 
-    auditRepo.clear();
-    auditRepo.log('CLEAR_DATA', admin.user, { message: 'Audit history cleared by administrator' });
+    await auditRepo.clear();
+    await auditRepo.log('CLEAR_DATA', admin.user, { message: 'Audit history cleared by administrator' });
     return NextResponse.json({ success: true, message: 'Audit history cleared successfully' });
   } catch (error) {
     console.error('Clear history error:', error);
