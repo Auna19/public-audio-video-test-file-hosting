@@ -3,16 +3,36 @@ import {
   SUPPORTED_EXTENSIONS,
   AUDIO_EXTENSIONS,
   VIDEO_EXTENSIONS,
+  DOCUMENT_EXTENSIONS,
   MIME_TYPE_MAP,
   DEFAULT_MAX_FILE_SIZE_BYTES,
 } from './constants.js';
 
 /**
- * Validates a buffer's magic bytes against expected audio/video signatures
+ * Validates a buffer's magic bytes against expected audio/video/document signatures
  */
 export function detectFileSignature(buffer) {
   if (!buffer || buffer.length < 4) {
     return {};
+  }
+
+  // PDF (%PDF)
+  if (buffer.subarray(0, 4).toString('ascii') === '%PDF') {
+    return { ext: '.pdf', mime: 'application/pdf', type: 'text' };
+  }
+
+  // ZIP / DOCX (PK\x03\x04)
+  if (
+    buffer[0] === 0x50 &&
+    buffer[1] === 0x4b &&
+    buffer[2] === 0x03 &&
+    buffer[3] === 0x04
+  ) {
+    return {
+      ext: '.docx',
+      mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      type: 'text',
+    };
   }
 
   // RIFF-based formats (WAV, AVI)
@@ -131,16 +151,25 @@ export function validateMediaFile(
   }
 
   const isAudio = AUDIO_EXTENSIONS.has(ext);
-  const mediaType = isAudio ? 'audio' : 'video';
-  const defaultMime = MIME_TYPE_MAP[ext] || (isAudio ? 'audio/mpeg' : 'video/mp4');
+  const isVideo = VIDEO_EXTENSIONS.has(ext);
+  const isDocument = DOCUMENT_EXTENSIONS.has(ext);
+
+  const mediaType = isDocument ? 'text' : isAudio ? 'audio' : 'video';
+  const defaultMime = MIME_TYPE_MAP[ext] || (isDocument ? 'text/plain' : isAudio ? 'audio/mpeg' : 'video/mp4');
 
   if (buffer && buffer.length > 0) {
     const detected = detectFileSignature(buffer);
     if (detected.type && detected.type !== mediaType) {
-      return {
-        valid: false,
-        error: `File signature mismatch: File was uploaded as ${mediaType} (${ext}), but content header indicates ${detected.type} (${detected.ext}).`,
-      };
+      // Allow general text files (e.g. .txt, .csv) that don't have binary signatures
+      if (!isDocument || detected.type !== 'video') {
+        // Only error if major mismatch (e.g. video renamed as audio or document)
+        if ((isAudio && detected.type === 'video') || (isVideo && detected.type === 'audio')) {
+          return {
+            valid: false,
+            error: `File signature mismatch: File was uploaded as ${mediaType} (${ext}), but content indicates ${detected.type} (${detected.ext}).`,
+          };
+        }
+      }
     }
   }
 

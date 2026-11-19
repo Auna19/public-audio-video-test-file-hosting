@@ -9,6 +9,8 @@ import {
   UploadCloud,
   FileAudio,
   FileVideo,
+  FileText,
+  Link2,
   Languages,
   CheckCircle2,
   AlertCircle,
@@ -18,18 +20,30 @@ import {
   Trash2,
   ArrowLeft,
   Sparkles,
+  Volume2,
 } from 'lucide-react';
-import { SUPPORTED_LANGUAGES, SUPPORTED_EXTENSIONS } from '@/lib/constants.js';
+import { SUPPORTED_LANGUAGES, SUPPORTED_EXTENSIONS, DOCUMENT_EXTENSIONS } from '@/lib/constants.js';
 
 export default function AdminUploadPage() {
   const router = useRouter();
   const fileInputRef = useRef(null);
+  const [activeTab, setActiveTab] = useState('files');
   const [items, setItems] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [defaultLanguage, setDefaultLanguage] = useState('ha');
   const [isBulkUploading, setIsBulkUploading] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [notification, setNotification] = useState({ isOpen: false });
+
+  // Direct Text / URL form state
+  const [directTitle, setDirectTitle] = useState('');
+  const [directLanguage, setDirectLanguage] = useState('ha');
+  const [directCustomLanguage, setDirectCustomLanguage] = useState('');
+  const [directText, setDirectText] = useState('');
+  const [directSourceUrl, setDirectSourceUrl] = useState('');
+  const [directDescription, setDirectDescription] = useState('');
+  const [directTags, setDirectTags] = useState('');
+  const [isSubmittingDirect, setIsSubmittingDirect] = useState(false);
 
   const addToast = (message, type = 'success') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -235,6 +249,67 @@ export default function AdminUploadPage() {
     });
   };
 
+  const handleDirectPublish = async (e) => {
+    e.preventDefault();
+    if (!directText.trim() && !directSourceUrl.trim()) {
+      addToast('Please enter text content or provide a source URL.', 'error');
+      return;
+    }
+
+    setIsSubmittingDirect(true);
+    try {
+      const formData = new FormData();
+      formData.append('title', directTitle.trim() || 'Text to Audio Document');
+      formData.append('language', directLanguage);
+      if (directLanguage === 'other') {
+        formData.append('customLanguage', directCustomLanguage);
+      }
+      formData.append('textContent', directText.trim());
+      formData.append('sourceUrl', directSourceUrl.trim());
+      formData.append('description', directDescription.trim());
+      formData.append('tags', directTags.trim());
+
+      const res = await fetch('/api/media', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to publish text resource');
+      }
+
+      setNotification({
+        isOpen: true,
+        type: 'success',
+        title: 'Text-to-Audio Resource Published! 🎉',
+        message: `"${data.file.title}" is now available in your cloud repository. You can copy the extracted text or copy the direct file URL anytime.`,
+        copyUrl: data.file.public_url,
+        primaryAction: {
+          label: 'View in Media Manager',
+          onClick: () => router.push('/admin/media'),
+        },
+        secondaryAction: {
+          label: 'Create Another',
+          onClick: () => {
+            setDirectTitle('');
+            setDirectText('');
+            setDirectSourceUrl('');
+            setDirectDescription('');
+            setDirectTags('');
+            setNotification({ isOpen: false });
+          },
+        },
+      });
+
+      addToast('Text-to-audio resource published successfully!', 'success');
+    } catch (err) {
+      addToast(err?.message || 'Error publishing text resource', 'error');
+    } finally {
+      setIsSubmittingDirect(false);
+    }
+  };
+
   const formatFileSize = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -257,14 +332,14 @@ export default function AdminUploadPage() {
             </Link>
             <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white flex items-center gap-2">
               <UploadCloud className="h-7 w-7 text-emerald-600" />
-              Upload Audio & Video Samples
+              Upload Media & Text to Audio
             </h1>
             <p className="mt-1 text-xs sm:text-sm text-slate-500 dark:text-slate-400">
-              Select or drag audio and video recordings in Hausa, Igbo, Yoruba, Nigerian Pidgin, or other languages.
+              Upload recordings, text documents (.txt, .pdf, .docx, .rtf, .csv), or publish direct text / URL for speech synthesis in Nigerian languages.
             </p>
           </div>
 
-          {items.length > 0 && (
+          {activeTab === 'files' && items.length > 0 && (
             <div className="flex items-center gap-3">
               <button
                 type="button"
@@ -286,7 +361,193 @@ export default function AdminUploadPage() {
           )}
         </div>
 
+        {/* Tab Switcher */}
+        <div className="flex items-center gap-2 mb-6 border-b border-slate-200 dark:border-slate-800 pb-3">
+          <button
+            type="button"
+            onClick={() => setActiveTab('files')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${
+              activeTab === 'files'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            <UploadCloud className="h-4 w-4" />
+            <span>File Upload (Audio, Video, Docs)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('text_url')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition cursor-pointer ${
+              activeTab === 'text_url'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700'
+            }`}
+          >
+            <FileText className="h-4 w-4" />
+            <span>URL / Direct Text to Audio</span>
+          </button>
+        </div>
+
+        {/* Direct Text / URL Form View */}
+        {activeTab === 'text_url' && (
+          <form
+            onSubmit={handleDirectPublish}
+            className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 sm:p-8 shadow-sm space-y-6"
+          >
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <FileText className="h-5 w-5 text-amber-500" />
+                <span>Create URL / Text to Audio Resource</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Enter or paste text, or input a website URL. The platform will extract the text and generate a direct file link and speech synthesis ready for Hausa, Yoruba, Igbo, Nigerian Pidgin, and English.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                  Resource Title *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Hausa Morning News Broadcast Script"
+                  value={directTitle}
+                  onChange={(e) => setDirectTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 px-3.5 py-2 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                  Target Language *
+                </label>
+                <select
+                  value={directLanguage}
+                  onChange={(e) => setDirectLanguage(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 px-3.5 py-2 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                >
+                  {SUPPORTED_LANGUAGES.map((lang) => (
+                    <option key={lang.code} value={lang.code}>
+                      {lang.name}
+                    </option>
+                  ))}
+                </select>
+                {directLanguage === 'other' && (
+                  <input
+                    type="text"
+                    placeholder="Enter custom language name"
+                    value={directCustomLanguage}
+                    onChange={(e) => setDirectCustomLanguage(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 px-3.5 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                )}
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                  Text Content (to read & copy)
+                </label>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {directText.length} characters • {directText.trim() ? directText.trim().split(/\s+/).length : 0} words
+                </span>
+              </div>
+              <textarea
+                rows={6}
+                placeholder="Paste or write the text script here. Users can read, listen to audio synthesis, or copy this text directly..."
+                value={directText}
+                onChange={(e) => setDirectText(e.target.value)}
+                className="w-full rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 p-3.5 text-xs sm:text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500 leading-relaxed"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                  Source URL (optional reference)
+                </label>
+                <div className="relative">
+                  <Link2 className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <input
+                    type="url"
+                    placeholder="https://example.com/article-or-text-file.txt"
+                    value={directSourceUrl}
+                    onChange={(e) => setDirectSourceUrl(e.target.value)}
+                    className="w-full pl-9 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 px-3.5 py-2 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                  Tags (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  placeholder="news, script, hausa, formal, test"
+                  value={directTags}
+                  onChange={(e) => setDirectTags(e.target.value)}
+                  className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 px-3.5 py-2 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700 dark:text-slate-300 mb-1.5">
+                Description (optional)
+              </label>
+              <input
+                type="text"
+                placeholder="Background notes, source description, dialect details..."
+                value={directDescription}
+                onChange={(e) => setDirectDescription(e.target.value)}
+                className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800 px-3.5 py-2 text-xs sm:text-sm text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setDirectTitle('');
+                  setDirectText('');
+                  setDirectSourceUrl('');
+                  setDirectDescription('');
+                  setDirectTags('');
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition"
+              >
+                Clear Fields
+              </button>
+
+              <button
+                type="submit"
+                disabled={isSubmittingDirect || (!directText.trim() && !directSourceUrl.trim())}
+                className="flex items-center gap-2 rounded-xl bg-amber-600 hover:bg-amber-700 px-6 py-2.5 text-xs sm:text-sm font-bold text-white shadow-md shadow-amber-600/20 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {isSubmittingDirect ? (
+                  <>
+                    <RotateCw className="h-4 w-4 animate-spin" />
+                    <span>Publishing Resource...</span>
+                  </>
+                ) : (
+                  <>
+                    <Volume2 className="h-4 w-4" />
+                    <span>Publish Text-to-Audio Resource</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </form>
+        )}
+
         {/* Drag & Drop Zone */}
+        {activeTab === 'files' && (
+        <>
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -423,6 +684,8 @@ export default function AdminUploadPage() {
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                       {item.file.type.startsWith('video') ? (
                         <FileVideo className="h-5 w-5 text-indigo-600" />
+                      ) : DOCUMENT_EXTENSIONS.has('.' + item.file.name.split('.').pop()?.toLowerCase()) ? (
+                        <FileText className="h-5 w-5 text-amber-500" />
                       ) : (
                         <FileAudio className="h-5 w-5 text-emerald-600" />
                       )}
@@ -639,6 +902,8 @@ export default function AdminUploadPage() {
               </div>
             )}
           </div>
+        )}
+        </>
         )}
       </main>
 

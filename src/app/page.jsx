@@ -10,6 +10,7 @@ import {
   Filter,
   Volume2,
   Video,
+  FileText,
   Layers,
   ArrowUpDown,
   Radio,
@@ -37,6 +38,18 @@ export default function PublicLibraryPage() {
       title: 'Direct Link Copied! 📋',
       message: `The direct streaming link for "${file?.title || 'media file'}" has been copied to your clipboard.`,
       copyUrl: url,
+      autoCloseMs: 4000,
+    });
+  };
+
+  const handleCopyText = (text, file) => {
+    addToast('Extracted text copied to clipboard!', 'success');
+    setNotification({
+      isOpen: true,
+      type: 'copy',
+      title: 'Text Copied to Clipboard! 📋',
+      message: `Extracted text from "${file?.title || 'document'}" has been copied to your clipboard.`,
+      copyUrl: text,
       autoCloseMs: 4000,
     });
   };
@@ -246,6 +259,17 @@ export default function PublicLibraryPage() {
                 >
                   <Video className="h-3 w-3" /> Video
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedType('text')}
+                  className={`flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                    selectedType === 'text'
+                      ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <FileText className="h-3 w-3" /> Text / Docs
+                </button>
               </div>
 
               <select
@@ -298,6 +322,7 @@ export default function PublicLibraryPage() {
                       file={file}
                       isAdmin={false}
                       onCopySuccess={(url, f) => handleCopyLink(url, f)}
+                      onCopyText={(text, f) => handleCopyText(text, f)}
                     />
                   ))}
                 </div>

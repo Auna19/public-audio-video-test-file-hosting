@@ -12,6 +12,7 @@ import {
   UploadCloud,
   FileAudio,
   FileVideo,
+  FileText,
   Languages,
   Download,
   Search,
@@ -207,6 +208,20 @@ export default function AdminDashboardPage() {
     });
   };
 
+  const copyText = (text, title = 'document') => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    addToast('Extracted text copied successfully!', 'success');
+    setNotification({
+      isOpen: true,
+      type: 'copy',
+      title: 'Extracted Text Copied! 📋',
+      message: `Extracted text from "${title}" has been copied to your clipboard.`,
+      copyUrl: text,
+      autoCloseMs: 3500,
+    });
+  };
+
   const formatFileSize = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -265,60 +280,71 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* Section 6 Summary Cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/90 dark:border-slate-800">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Total Files</span>
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3.5 mb-8">
+          <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/90 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">Total Files</span>
               <HardDrive className="h-4 w-4 text-emerald-600" />
             </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {stats ? stats.totalFiles : 0}
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">Across all formats</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">Across all media</p>
           </div>
 
-          <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/90 dark:border-slate-800">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Audio Files</span>
+          <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/90 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">Audio</span>
               <FileAudio className="h-4 w-4 text-blue-600" />
             </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {stats ? stats.totalAudio : 0}
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">Speech & dialogue</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">Speech & voice</p>
           </div>
 
-          <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/90 dark:border-slate-800">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Video Files</span>
+          <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/90 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">Video</span>
               <FileVideo className="h-4 w-4 text-indigo-600" />
             </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {stats ? stats.totalVideo : 0}
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">MP4, WebM, etc.</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">MP4, WebM, etc.</p>
           </div>
 
-          <div className="rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/90 dark:border-slate-800">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Languages</span>
+          <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/90 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">Text / Audio</span>
+              <FileText className="h-4 w-4 text-amber-500" />
+            </div>
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
+              {stats ? (stats.totalText || 0) : 0}
+            </div>
+            <p className="mt-0.5 text-[10px] text-slate-500">Docs & scripts</p>
+          </div>
+
+          <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/90 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">Languages</span>
               <Languages className="h-4 w-4 text-purple-600" />
             </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {stats ? stats.totalLanguages : 0}
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">Nigerian & others</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">Supported</p>
           </div>
 
-          <div className="col-span-2 lg:col-span-1 rounded-2xl bg-white dark:bg-slate-900 p-5 shadow-xs border border-slate-200/90 dark:border-slate-800">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-2">
-              <span className="text-xs font-medium uppercase tracking-wider">Downloads</span>
-              <Download className="h-4 w-4 text-amber-600" />
+          <div className="rounded-2xl bg-white dark:bg-slate-900 p-4 shadow-xs border border-slate-200/90 dark:border-slate-800">
+            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400 mb-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wider">Downloads</span>
+              <Download className="h-4 w-4 text-emerald-600" />
             </div>
-            <div className="text-2xl font-black text-slate-900 dark:text-white">
+            <div className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white">
               {stats ? stats.totalDownloads : 0}
             </div>
-            <p className="mt-1 text-[11px] text-slate-500">Total downloads</p>
+            <p className="mt-0.5 text-[10px] text-slate-500">Total hits</p>
           </div>
         </div>
 
@@ -358,6 +384,7 @@ export default function AdminDashboardPage() {
                 <option value="all">All Types</option>
                 <option value="audio">Audio Only</option>
                 <option value="video">Video Only</option>
+                <option value="text">Text / Docs Only</option>
               </select>
             </div>
 
@@ -417,6 +444,7 @@ export default function AdminDashboardPage() {
                   onEdit={(f) => setEditingFile(f)}
                   onTogglePublic={(f) => handleTogglePublic(f)}
                   onCopySuccess={(url, f) => copyUrl(url, f?.title || file.title)}
+                  onCopyText={(text, f) => copyText(text, f?.title || file.title)}
                 />
               ))}
             </div>
@@ -455,7 +483,13 @@ export default function AdminDashboardPage() {
 
                       <td className="py-3.5 px-4 font-mono">
                         <span className="inline-flex items-center gap-1 rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 text-[11px] text-slate-700 dark:text-slate-300">
-                          {file.media_type === 'audio' ? <FileAudio className="h-3 w-3 text-emerald-600" /> : <FileVideo className="h-3 w-3 text-indigo-600" />}
+                          {file.media_type === 'text' || ['.txt', '.pdf', '.docx', '.rtf', '.csv', '.json', '.md'].includes((file.file_extension || '').toLowerCase()) ? (
+                            <FileText className="h-3 w-3 text-amber-500" />
+                          ) : file.media_type === 'audio' ? (
+                            <FileAudio className="h-3 w-3 text-emerald-600" />
+                          ) : (
+                            <FileVideo className="h-3 w-3 text-indigo-600" />
+                          )}
                           {file.file_extension}
                         </span>
                       </td>
@@ -496,6 +530,17 @@ export default function AdminDashboardPage() {
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-1.5">
+                          {file.text_content && (
+                            <button
+                              type="button"
+                              onClick={() => copyText(file.text_content, file.title)}
+                              className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-amber-600 dark:text-amber-400 hover:bg-slate-100 transition shadow-2xs"
+                              title="Copy extracted text"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+
                           <button
                             type="button"
                             onClick={() => copyUrl(file.public_url, file.title)}

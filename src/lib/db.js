@@ -2,7 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
-import { SUPPORTED_LANGUAGES } from './constants.js';
+import { SUPPORTED_LANGUAGES, DOCUMENT_EXTENSIONS, AUDIO_EXTENSIONS, VIDEO_EXTENSIONS } from './constants.js';
 import { supabaseAdmin, isSupabaseConfigured } from './supabase.js';
 
 const DATA_DIR = process.env.VERCEL ? path.join('/tmp', 'data') : path.join(process.cwd(), 'data');
@@ -45,6 +45,7 @@ function initSchema(db) {
         file_size INTEGER NOT NULL,
         description TEXT,
         tags TEXT,
+        text_content TEXT,
         upload_status TEXT NOT NULL DEFAULT 'completed',
         is_public INTEGER NOT NULL DEFAULT 1,
         download_count INTEGER NOT NULL DEFAULT 0,
@@ -82,6 +83,11 @@ function initSchema(db) {
       );
     `);
 
+    // Migration: ensure text_content column exists
+    try {
+      db.exec(`ALTER TABLE media_files ADD COLUMN text_content TEXT;`);
+    } catch {}
+
     // Seed default languages if table is empty
     const countRow = db.prepare(`SELECT COUNT(*) as count FROM languages`).get();
     if (countRow.count === 0) {
@@ -101,6 +107,10 @@ function initSchema(db) {
 
 export const mediaRepo = {
   async findAll(options = {}) {
+    const isTextFilter = options.mediaType === 'text';
+    const isAudioFilter = options.mediaType === 'audio';
+    const isVideoFilter = options.mediaType === 'video';
+
     // 1. If Supabase configured, query Supabase
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
@@ -112,12 +122,24 @@ export const mediaRepo = {
         if (options.language && options.language !== 'all') {
           q = q.eq('language_code', options.language);
         }
-        if (options.mediaType && options.mediaType !== 'all') {
-          q = q.eq('media_type', options.mediaType);
+
+        if (isTextFilter) {
+          // Matches media_type 'text' or document extensions
+          const docExtList = Array.from(DOCUMENT_EXTENSIONS);
+          q = q.or(`media_type.eq.text,file_extension.in.(${docExtList.join(',')})`);
+        } else if (isAudioFilter) {
+          q = q.eq('media_type', 'audio');
+          // Exclude document extensions if any were stored as audio for backward compatibility
+          for (const docExt of DOCUMENT_EXTENSIONS) {
+            q = q.neq('file_extension', docExt);
+          }
+        } else if (isVideoFilter) {
+          q = q.eq('media_type', 'video');
         }
+
         if (options.search && options.search.trim()) {
           const term = `%${options.search.trim()}%`;
-          q = q.or(`title.ilike.${term},description.ilike.${term},tags.ilike.${term},original_file_name.ilike.${term}`);
+          q = q.or(`title.ilike.${term},description.ilike.${term},tags.ilike.${term},original_file_name.ilike.${term},text_content.ilike.${term}`);
         }
 
         switch (options.sort) {
@@ -138,7 +160,13 @@ export const mediaRepo = {
 
         const { data, error } = await q;
         if (!error && Array.isArray(data)) {
-          return data;
+          // Normalize media_type in client response
+          return data.map((item) => {
+            if (DOCUMENT_EXTENSIONS.has(item.file_extension?.toLowerCase())) {
+              return { ...item, media_type: 'text' };
+            }
+            return item;
+          });
         }
         if (error) {
           console.warn('Supabase media findAll fallback to SQLite:', error.message);
@@ -161,14 +189,25 @@ export const mediaRepo = {
         query += ` AND language_code = ?`;
         params.push(options.language);
       }
-      if (options.mediaType && options.mediaType !== 'all') {
-        query += ` AND media_type = ?`;
-        params.push(options.mediaType);
+
+      if (isTextFilter) {
+        const docExts = Array.from(DOCUMENT_EXTENSIONS);
+        const placeholders = docExts.map(() => '?').join(',');
+        query += ` AND (media_type = 'text' OR file_extension IN (${placeholders}))`;
+        params.push(...docExts);
+      } else if (isAudioFilter) {
+        const docExts = Array.from(DOCUMENT_EXTENSIONS);
+        const placeholders = docExts.map(() => '?').join(',');
+        query += ` AND media_type = 'audio' AND file_extension NOT IN (${placeholders})`;
+        params.push(...docExts);
+      } else if (isVideoFilter) {
+        query += ` AND media_type = 'video'`;
       }
+
       if (options.search && options.search.trim()) {
-        query += ` AND (title LIKE ? OR description LIKE ? OR tags LIKE ? OR original_file_name LIKE ?)`;
+        query += ` AND (title LIKE ? OR description LIKE ? OR tags LIKE ? OR original_file_name LIKE ? OR text_content LIKE ?)`;
         const term = `%${options.search.trim()}%`;
-        params.push(term, term, term, term);
+        params.push(term, term, term, term, term);
       }
 
       switch (options.sort) {
@@ -188,7 +227,13 @@ export const mediaRepo = {
       }
 
       const stmt = db.prepare(query);
-      return stmt.all(...params);
+      const rows = stmt.all(...params);
+      return rows.map((item) => {
+        if (DOCUMENT_EXTENSIONS.has(item.file_extension?.toLowerCase())) {
+          return { ...item, media_type: 'text' };
+        }
+        return item;
+      });
     } catch (e) {
       console.error('SQLite findAll error:', e);
       return [];
@@ -199,13 +244,22 @@ export const mediaRepo = {
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
         const { data, error } = await supabaseAdmin.from('media_files').select('*').eq('id', id).maybeSingle();
-        if (!error && data) return data;
+        if (!error && data) {
+          if (DOCUMENT_EXTENSIONS.has(data.file_extension?.toLowerCase())) {
+            return { ...data, media_type: 'text' };
+          }
+          return data;
+        }
       } catch {}
     }
     try {
       const db = getDb();
       const stmt = db.prepare(`SELECT * FROM media_files WHERE id = ?`);
-      return stmt.get(id) || null;
+      const row = stmt.get(id);
+      if (row && DOCUMENT_EXTENSIONS.has(row.file_extension?.toLowerCase())) {
+        return { ...row, media_type: 'text' };
+      }
+      return row || null;
     } catch {
       return null;
     }
@@ -219,25 +273,42 @@ export const mediaRepo = {
           .select('*')
           .eq('storage_path', storagePath)
           .maybeSingle();
-        if (!error && data) return data;
+        if (!error && data) {
+          if (DOCUMENT_EXTENSIONS.has(data.file_extension?.toLowerCase())) {
+            return { ...data, media_type: 'text' };
+          }
+          return data;
+        }
       } catch {}
     }
     try {
       const db = getDb();
       const stmt = db.prepare(`SELECT * FROM media_files WHERE storage_path = ?`);
-      return stmt.get(storagePath) || null;
+      const row = stmt.get(storagePath);
+      if (row && DOCUMENT_EXTENSIONS.has(row.file_extension?.toLowerCase())) {
+        return { ...row, media_type: 'text' };
+      }
+      return row || null;
     } catch {
       return null;
     }
   },
 
   async create(record) {
-    // 1. Supabase write
+    // 1. Supabase write with automatic constraint fallback
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
         const { error } = await supabaseAdmin.from('media_files').insert(record);
         if (error) {
-          console.error('Supabase media create error:', error);
+          console.warn('Supabase media create warning:', error.message);
+          // If check constraint fails on media_type ('audio','video'), retry safely with 'audio'
+          if (error.message && (error.message.includes('check constraint') || error.message.includes('media_type'))) {
+            const fallbackRecord = { ...record, media_type: 'audio' };
+            const { error: retryErr } = await supabaseAdmin.from('media_files').insert(fallbackRecord);
+            if (retryErr) {
+              console.error('Supabase retry insert error:', retryErr.message);
+            }
+          }
         }
       } catch (err) {
         console.error('Supabase media create exception:', err);
@@ -251,12 +322,12 @@ export const mediaRepo = {
         INSERT OR REPLACE INTO media_files (
           id, title, original_file_name, storage_path, public_url,
           language, language_code, media_type, file_extension, mime_type,
-          file_size, description, tags, upload_status, is_public,
+          file_size, description, tags, text_content, upload_status, is_public,
           download_count, created_at, updated_at, uploaded_by
         ) VALUES (
           ?, ?, ?, ?, ?,
           ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
           ?, ?, ?, ?
         )
       `);
@@ -275,6 +346,7 @@ export const mediaRepo = {
         record.file_size,
         record.description || null,
         record.tags || null,
+        record.text_content || null,
         record.upload_status || 'completed',
         record.is_public ?? 1,
         record.download_count ?? 0,
@@ -314,6 +386,7 @@ export const mediaRepo = {
         'language_code',
         'description',
         'tags',
+        'text_content',
         'is_public',
         'download_count',
         'upload_status',
@@ -379,17 +452,27 @@ export const mediaRepo = {
       try {
         const { data, error } = await supabaseAdmin
           .from('media_files')
-          .select('media_type, language_code, download_count, is_public');
+          .select('media_type, file_extension, language_code, download_count, is_public');
 
         if (!error && Array.isArray(data)) {
           let totalAudio = 0;
           let totalVideo = 0;
+          let totalText = 0;
           let totalDownloads = 0;
           const langSet = new Set();
 
           for (const row of data) {
-            if (row.media_type === 'audio') totalAudio++;
-            if (row.media_type === 'video') totalVideo++;
+            const ext = row.file_extension?.toLowerCase();
+            const isDoc = DOCUMENT_EXTENSIONS.has(ext) || row.media_type === 'text';
+
+            if (isDoc) {
+              totalText++;
+            } else if (row.media_type === 'audio') {
+              totalAudio++;
+            } else if (row.media_type === 'video') {
+              totalVideo++;
+            }
+
             if (row.language_code) langSet.add(row.language_code);
             totalDownloads += Number(row.download_count) || 0;
           }
@@ -398,6 +481,7 @@ export const mediaRepo = {
             totalFiles: data.length,
             totalAudio,
             totalVideo,
+            totalText,
             totalLanguages: langSet.size,
             totalDownloads,
           };
@@ -410,28 +494,46 @@ export const mediaRepo = {
     // 2. High-speed single aggregated query in SQLite
     try {
       const db = getDb();
-      const row = db.prepare(`
-        SELECT
-          COUNT(*) as totalFiles,
-          COALESCE(SUM(CASE WHEN media_type = 'audio' THEN 1 ELSE 0 END), 0) as totalAudio,
-          COALESCE(SUM(CASE WHEN media_type = 'video' THEN 1 ELSE 0 END), 0) as totalVideo,
-          COUNT(DISTINCT language_code) as totalLanguages,
-          COALESCE(SUM(download_count), 0) as totalDownloads
-        FROM media_files
-      `).get();
+      const rows = db.prepare(`
+        SELECT media_type, file_extension, language_code, download_count FROM media_files
+      `).all();
+
+      let totalAudio = 0;
+      let totalVideo = 0;
+      let totalText = 0;
+      let totalDownloads = 0;
+      const langSet = new Set();
+
+      for (const row of rows) {
+        const ext = row.file_extension?.toLowerCase();
+        const isDoc = DOCUMENT_EXTENSIONS.has(ext) || row.media_type === 'text';
+
+        if (isDoc) {
+          totalText++;
+        } else if (row.media_type === 'audio') {
+          totalAudio++;
+        } else if (row.media_type === 'video') {
+          totalVideo++;
+        }
+
+        if (row.language_code) langSet.add(row.language_code);
+        totalDownloads += Number(row.download_count) || 0;
+      }
 
       return {
-        totalFiles: Number(row?.totalFiles) || 0,
-        totalAudio: Number(row?.totalAudio) || 0,
-        totalVideo: Number(row?.totalVideo) || 0,
-        totalLanguages: Number(row?.totalLanguages) || 0,
-        totalDownloads: Number(row?.totalDownloads) || 0,
+        totalFiles: rows.length,
+        totalAudio,
+        totalVideo,
+        totalText,
+        totalLanguages: langSet.size,
+        totalDownloads,
       };
     } catch (e) {
       return {
         totalFiles: 0,
         totalAudio: 0,
         totalVideo: 0,
+        totalText: 0,
         totalLanguages: 0,
         totalDownloads: 0,
       };

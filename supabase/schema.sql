@@ -26,12 +26,13 @@ CREATE TABLE IF NOT EXISTS public.media_files (
   public_url TEXT NOT NULL,
   language TEXT NOT NULL,
   language_code TEXT NOT NULL REFERENCES public.languages(code) ON DELETE RESTRICT,
-  media_type TEXT NOT NULL CHECK (media_type IN ('audio', 'video')),
+  media_type TEXT NOT NULL CHECK (media_type IN ('audio', 'video', 'text', 'document')),
   file_extension TEXT NOT NULL,
   mime_type TEXT NOT NULL,
   file_size BIGINT NOT NULL,
   description TEXT,
   tags TEXT,
+  text_content TEXT,
   upload_status TEXT DEFAULT 'completed',
   is_public INTEGER DEFAULT 1,
   download_count INTEGER DEFAULT 0,
@@ -61,3 +62,10 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 -- Public can read languages and public media
 CREATE POLICY "Public read languages" ON public.languages FOR SELECT USING (true);
 CREATE POLICY "Public read active media" ON public.media_files FOR SELECT USING (is_public = 1);
+
+-- ========================================================================
+-- Migration snippet for existing databases (run if you already created tables):
+-- ========================================================================
+-- ALTER TABLE public.media_files ADD COLUMN IF NOT EXISTS text_content TEXT;
+-- ALTER TABLE public.media_files DROP CONSTRAINT IF EXISTS media_files_media_type_check;
+-- ALTER TABLE public.media_files ADD CONSTRAINT media_files_media_type_check CHECK (media_type IN ('audio', 'video', 'text', 'document'));

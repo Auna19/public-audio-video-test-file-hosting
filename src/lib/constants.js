@@ -7,27 +7,6 @@ export const SUPPORTED_LANGUAGES = [
   { code: 'other', name: 'Other', nativeName: 'Custom Language', badgeColor: 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300 border-zinc-300 dark:border-zinc-700' },
 ];
 
-export const SUPPORTED_EXTENSIONS = [
-  '.aac',
-  '.amr',
-  '.avi',
-  '.flac',
-  '.m4a',
-  '.m4v',
-  '.mkv',
-  '.mov',
-  '.mp3',
-  '.mp4',
-  '.mpeg',
-  '.mpg',
-  '.oga',
-  '.ogg',
-  '.opus',
-  '.wav',
-  '.webm',
-  '.weba',
-];
-
 export const AUDIO_EXTENSIONS = new Set([
   '.aac',
   '.amr',
@@ -52,25 +31,55 @@ export const VIDEO_EXTENSIONS = new Set([
   '.webm',
 ]);
 
+export const DOCUMENT_EXTENSIONS = new Set([
+  '.txt',
+  '.pdf',
+  '.doc',
+  '.docx',
+  '.csv',
+  '.json',
+  '.rtf',
+  '.md',
+]);
+
+export const SUPPORTED_EXTENSIONS = [
+  ...Array.from(AUDIO_EXTENSIONS),
+  ...Array.from(VIDEO_EXTENSIONS),
+  ...Array.from(DOCUMENT_EXTENSIONS),
+].sort();
+
 export const MIME_TYPE_MAP = {
+  // Audio
   '.aac': 'audio/aac',
   '.amr': 'audio/amr',
-  '.avi': 'video/x-msvideo',
   '.flac': 'audio/flac',
   '.m4a': 'audio/mp4',
-  '.m4v': 'video/x-m4v',
-  '.mkv': 'video/x-matroska',
-  '.mov': 'video/quicktime',
   '.mp3': 'audio/mpeg',
-  '.mp4': 'video/mp4',
-  '.mpeg': 'video/mpeg',
-  '.mpg': 'video/mpeg',
   '.oga': 'audio/ogg',
   '.ogg': 'audio/ogg',
   '.opus': 'audio/opus',
   '.wav': 'audio/wav',
-  '.webm': 'video/webm',
   '.weba': 'audio/webm',
+
+  // Video
+  '.avi': 'video/x-msvideo',
+  '.m4v': 'video/x-m4v',
+  '.mkv': 'video/x-matroska',
+  '.mov': 'video/quicktime',
+  '.mp4': 'video/mp4',
+  '.mpeg': 'video/mpeg',
+  '.mpg': 'video/mpeg',
+  '.webm': 'video/webm',
+
+  // Documents & Text to Audio
+  '.txt': 'text/plain; charset=utf-8',
+  '.pdf': 'application/pdf',
+  '.doc': 'application/msword',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.csv': 'text/csv; charset=utf-8',
+  '.json': 'application/json',
+  '.rtf': 'application/rtf',
+  '.md': 'text/markdown; charset=utf-8',
 };
 
 // Default max upload size: 100 MB

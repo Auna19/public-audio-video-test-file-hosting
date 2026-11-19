@@ -18,12 +18,14 @@ import {
   ExternalLink,
   ShieldCheck,
   ChevronRight,
+  Volume2,
 } from 'lucide-react';
 import ConfirmModal from '@/components/ConfirmModal.jsx';
 
 const NAV_ITEMS = [
   { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
   { name: 'Upload Media', href: '/admin/upload', icon: UploadCloud },
+  { name: 'Text to Audio', href: '/text-to-audio', icon: Volume2 },
   { name: 'All Media Files', href: '/admin/media', icon: FolderOpen },
   { name: 'Languages', href: '/admin/languages', icon: Languages },
   { name: 'Upload History', href: '/admin/history', icon: History },
