@@ -105,6 +105,31 @@ function initSchema(db) {
   }
 }
 
+export function normalizeMediaItem(item) {
+  if (!item) return item;
+  const ext = (item.file_extension || '').toLowerCase();
+  const isDoc = DOCUMENT_EXTENSIONS.has(ext) || item.media_type === 'text';
+
+  let textContent = item.text_content || '';
+  let description = item.description || '';
+
+  // Extract text_content from description fallback if encoded
+  if (!textContent && description && description.includes('[TEXT_CONTENT]: ')) {
+    const textMatch = description.match(/\[TEXT_CONTENT\]:\s*([\s\S]*?)(?:\n\[DESC\]:\s*([\s\S]*))?$/);
+    if (textMatch) {
+      textContent = textMatch[1].trim();
+      description = (textMatch[2] || '').trim() || null;
+    }
+  }
+
+  return {
+    ...item,
+    media_type: isDoc ? 'text' : item.media_type,
+    text_content: textContent || null,
+    description: description || null,
+  };
+}
+
 export const mediaRepo = {
   async findAll(options = {}) {
     const isTextFilter = options.mediaType === 'text';
@@ -124,22 +149,18 @@ export const mediaRepo = {
         }
 
         if (isTextFilter) {
-          // Matches media_type 'text' or document extensions
           const docExtList = Array.from(DOCUMENT_EXTENSIONS);
           q = q.or(`media_type.eq.text,file_extension.in.(${docExtList.join(',')})`);
         } else if (isAudioFilter) {
-          q = q.eq('media_type', 'audio');
-          // Exclude document extensions if any were stored as audio for backward compatibility
-          for (const docExt of DOCUMENT_EXTENSIONS) {
-            q = q.neq('file_extension', docExt);
-          }
+          const docExtList = Array.from(DOCUMENT_EXTENSIONS);
+          q = q.eq('media_type', 'audio').not('file_extension', 'in', `(${docExtList.join(',')})`);
         } else if (isVideoFilter) {
           q = q.eq('media_type', 'video');
         }
 
         if (options.search && options.search.trim()) {
           const term = `%${options.search.trim()}%`;
-          q = q.or(`title.ilike.${term},description.ilike.${term},tags.ilike.${term},original_file_name.ilike.${term},text_content.ilike.${term}`);
+          q = q.or(`title.ilike.${term},description.ilike.${term},tags.ilike.${term},original_file_name.ilike.${term}`);
         }
 
         switch (options.sort) {
@@ -160,13 +181,7 @@ export const mediaRepo = {
 
         const { data, error } = await q;
         if (!error && Array.isArray(data)) {
-          // Normalize media_type in client response
-          return data.map((item) => {
-            if (DOCUMENT_EXTENSIONS.has(item.file_extension?.toLowerCase())) {
-              return { ...item, media_type: 'text' };
-            }
-            return item;
-          });
+          return data.map(normalizeMediaItem);
         }
         if (error) {
           console.warn('Supabase media findAll fallback to SQLite:', error.message);
@@ -228,12 +243,7 @@ export const mediaRepo = {
 
       const stmt = db.prepare(query);
       const rows = stmt.all(...params);
-      return rows.map((item) => {
-        if (DOCUMENT_EXTENSIONS.has(item.file_extension?.toLowerCase())) {
-          return { ...item, media_type: 'text' };
-        }
-        return item;
-      });
+      return rows.map(normalizeMediaItem);
     } catch (e) {
       console.error('SQLite findAll error:', e);
       return [];
@@ -245,10 +255,7 @@ export const mediaRepo = {
       try {
         const { data, error } = await supabaseAdmin.from('media_files').select('*').eq('id', id).maybeSingle();
         if (!error && data) {
-          if (DOCUMENT_EXTENSIONS.has(data.file_extension?.toLowerCase())) {
-            return { ...data, media_type: 'text' };
-          }
-          return data;
+          return normalizeMediaItem(data);
         }
       } catch {}
     }
@@ -256,10 +263,7 @@ export const mediaRepo = {
       const db = getDb();
       const stmt = db.prepare(`SELECT * FROM media_files WHERE id = ?`);
       const row = stmt.get(id);
-      if (row && DOCUMENT_EXTENSIONS.has(row.file_extension?.toLowerCase())) {
-        return { ...row, media_type: 'text' };
-      }
-      return row || null;
+      return row ? normalizeMediaItem(row) : null;
     } catch {
       return null;
     }
@@ -274,10 +278,7 @@ export const mediaRepo = {
           .eq('storage_path', storagePath)
           .maybeSingle();
         if (!error && data) {
-          if (DOCUMENT_EXTENSIONS.has(data.file_extension?.toLowerCase())) {
-            return { ...data, media_type: 'text' };
-          }
-          return data;
+          return normalizeMediaItem(data);
         }
       } catch {}
     }
@@ -285,30 +286,56 @@ export const mediaRepo = {
       const db = getDb();
       const stmt = db.prepare(`SELECT * FROM media_files WHERE storage_path = ?`);
       const row = stmt.get(storagePath);
-      if (row && DOCUMENT_EXTENSIONS.has(row.file_extension?.toLowerCase())) {
-        return { ...row, media_type: 'text' };
-      }
-      return row || null;
+      return row ? normalizeMediaItem(row) : null;
     } catch {
       return null;
     }
   },
 
   async create(record) {
-    // 1. Supabase write with automatic constraint fallback
+    let createdRecord = { ...record };
+
+    // 1. Supabase write with automatic constraint & schema fallback
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
-        const { error } = await supabaseAdmin.from('media_files').insert(record);
-        if (error) {
-          console.warn('Supabase media create warning:', error.message);
-          // If check constraint fails on media_type ('audio','video'), retry safely with 'audio'
-          if (error.message && (error.message.includes('check constraint') || error.message.includes('media_type'))) {
-            const fallbackRecord = { ...record, media_type: 'audio' };
-            const { error: retryErr } = await supabaseAdmin.from('media_files').insert(fallbackRecord);
-            if (retryErr) {
-              console.error('Supabase retry insert error:', retryErr.message);
-            }
+        let payload = { ...record };
+
+        // Attempt 1: Full payload
+        let { data, error } = await supabaseAdmin.from('media_files').insert(payload).select().maybeSingle();
+
+        // If error mentions missing text_content column (PGRST204)
+        if (error && (error.message?.includes('text_content') || error.code === 'PGRST204')) {
+          console.warn('Supabase media_files missing text_content column; storing in description fallback.');
+          delete payload.text_content;
+          if (record.text_content) {
+            payload.description = record.description
+              ? `[TEXT_CONTENT]: ${record.text_content}\n[DESC]: ${record.description}`
+              : `[TEXT_CONTENT]: ${record.text_content}`;
           }
+          const res = await supabaseAdmin.from('media_files').insert(payload).select().maybeSingle();
+          data = res.data;
+          error = res.error;
+        }
+
+        // If error mentions media_type check constraint (23514)
+        if (error && (error.message?.includes('check constraint') || error.message?.includes('media_type') || error.code === '23514')) {
+          console.warn('Supabase media_type check constraint fallback to audio.');
+          payload.media_type = 'audio';
+          delete payload.text_content;
+          if (record.text_content && !payload.description?.includes('[TEXT_CONTENT]:')) {
+            payload.description = record.description
+              ? `[TEXT_CONTENT]: ${record.text_content}\n[DESC]: ${record.description}`
+              : `[TEXT_CONTENT]: ${record.text_content}`;
+          }
+          const retryRes = await supabaseAdmin.from('media_files').insert(payload).select().maybeSingle();
+          data = retryRes.data;
+          error = retryRes.error;
+        }
+
+        if (error) {
+          console.error('Supabase media create error:', error.message);
+        } else if (data) {
+          createdRecord = normalizeMediaItem({ ...record, ...data });
         }
       } catch (err) {
         console.error('Supabase media create exception:', err);
@@ -358,17 +385,34 @@ export const mediaRepo = {
       console.warn('SQLite media create warning:', e.message);
     }
 
-    return record;
+    return createdRecord;
   },
 
   async update(id, updates = {}) {
     const now = new Date().toISOString();
-    const updatePayload = { ...updates, updated_at: now };
+    let updatePayload = { ...updates, updated_at: now };
 
     // Supabase update
     if (isSupabaseConfigured && supabaseAdmin) {
       try {
-        await supabaseAdmin.from('media_files').update(updatePayload).eq('id', id);
+        let sbPayload = { ...updatePayload };
+        let { error } = await supabaseAdmin.from('media_files').update(sbPayload).eq('id', id);
+
+        if (error && (error.message?.includes('text_content') || error.code === 'PGRST204')) {
+          delete sbPayload.text_content;
+          if (updates.text_content) {
+            sbPayload.description = updates.description
+              ? `[TEXT_CONTENT]: ${updates.text_content}\n[DESC]: ${updates.description}`
+              : `[TEXT_CONTENT]: ${updates.text_content}`;
+          }
+          const res = await supabaseAdmin.from('media_files').update(sbPayload).eq('id', id);
+          error = res.error;
+        }
+
+        if (error && (error.message?.includes('check constraint') || error.message?.includes('media_type') || error.code === '23514')) {
+          sbPayload.media_type = 'audio';
+          await supabaseAdmin.from('media_files').update(sbPayload).eq('id', id);
+        }
       } catch (err) {
         console.error('Supabase media update error:', err);
       }
