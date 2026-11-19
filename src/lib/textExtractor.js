@@ -128,6 +128,7 @@ function parseXmlWordDocument(xmlStr) {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
     .replace(/&#39;/g, "'")
     .replace(/[ \t]+/g, ' ')
     .replace(/\n\s*\n/g, '\n\n')
@@ -216,45 +217,140 @@ function decompressPdfStream(streamBuffer, dictStr = '') {
 }
 
 /**
- * Decodes PDF string escapes and octal encodings (supporting Nigerian language hook characters)
+ * Parses a /ToUnicode CMap character mapping stream into a Map<charCode, unicodeChar>
  */
-function decodePdfString(rawStr) {
-  // ReportLab / Type1 / TrueType octal glyph mappings (Hausa / Yoruba / Igbo characters)
-  let str = rawStr.replace(/\\([0-7]{1,3})/g, (match, octal) => {
-    const code = parseInt(octal, 8);
-    if (code === 1) return 'ɗ';
-    if (code === 2) return 'ƙ';
-    if (code === 3) return 'ɓ';
-    if (code === 4) return 'ƴ';
-    return String.fromCharCode(code);
-  });
-
-  return str
-    .replace(/\\n/g, '\n')
-    .replace(/\\r/g, '\r')
-    .replace(/\\t/g, '\t')
-    .replace(/\\b/g, '\b')
-    .replace(/\\f/g, '\f')
-    .replace(/\\([()\\])/g, '$1');
+function parseCMap(cmapStr) {
+  const map = new Map();
+  const bfcharRegex = /beginbfchar([\s\S]*?)endbfchar/g;
+  let m;
+  while ((m = bfcharRegex.exec(cmapStr)) !== null) {
+    const lines = m[1].trim().split('\n');
+    for (const line of lines) {
+      const pair = line.trim().match(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>/);
+      if (pair) {
+        const charCode = parseInt(pair[1], 16);
+        const unicodeCode = parseInt(pair[2], 16);
+        if (unicodeCode !== 0) {
+          map.set(charCode, String.fromCodePoint(unicodeCode));
+        }
+      }
+    }
+  }
+  return map;
 }
 
 /**
  * Robust PDF text stream extractor supporting compressed streams (FlateDecode, ASCII85Decode)
+ * and true Unicode Font CMaps (Hausa, Igbo, Yoruba, and custom font encodings).
  */
 function extractPdfText(buffer) {
   try {
     const raw = buffer.toString('latin1');
-    const paragraphs = [];
 
-    // Match each object dictionary that immediately precedes its stream
-    const streamRegex = /<<((?:(?!<<)[\s\S])*?)>>\s*stream\r?\n?([\s\S]*?)endstream/g;
+    // 1. Build map of Object Number -> CMap for all /ToUnicode CMaps in the document
+    const objStreamRegex = /(\d+)\s+0\s+obj\s*<<((?:(?!<<)[\s\S])*?)>>\s*stream(?:\r\n|\n)([\s\S]*?)endstream/g;
+    const cmapsByObjNum = new Map();
+    let m;
+
+    while ((m = objStreamRegex.exec(raw)) !== null) {
+      const objNum = m[1];
+      const dict = m[2];
+      let streamBody = Buffer.from(m[3], 'latin1');
+      const lenMatch = dict.match(/\/Length\s+(\d+)/);
+      if (lenMatch) {
+        const expectedLen = parseInt(lenMatch[1], 10);
+        if (expectedLen > 0 && streamBody.length >= expectedLen) {
+          streamBody = streamBody.subarray(0, expectedLen);
+        }
+      }
+
+      const decompressed = decompressPdfStream(streamBody, dict);
+      if (decompressed.includes('/CIDInit') || decompressed.includes('beginbfchar')) {
+        cmapsByObjNum.set(objNum, parseCMap(decompressed));
+      }
+    }
+
+    // 2. Map Font Name (/F2+0, /F3+0, /F1) directly to its ToUnicode CMap
+    const fontObjRegex = /(\d+)\s+0\s+obj\s*<<((?:(?!<<)[\s\S])*?)>>/g;
+    const fontNameToCmap = new Map();
+    while ((m = fontObjRegex.exec(raw)) !== null) {
+      const dict = m[2];
+      const nameMatch = dict.match(/\/Name\s*\/([^\s\/]+)/);
+      const toUniMatch = dict.match(/\/ToUnicode\s+(\d+)\s+0\s+R/);
+      if (nameMatch && toUniMatch) {
+        const fontName = nameMatch[1];
+        const toUniObj = toUniMatch[1];
+        if (cmapsByObjNum.has(toUniObj)) {
+          fontNameToCmap.set(fontName, cmapsByObjNum.get(toUniObj));
+        }
+      }
+    }
+
+    // Merged fallback CMap from all fonts in document
+    const mergedCmap = new Map();
+    for (const cmap of cmapsByObjNum.values()) {
+      for (const [code, char] of cmap.entries()) {
+        if (code < 32 || code >= 127) {
+          if (!mergedCmap.has(code)) mergedCmap.set(code, char);
+        }
+      }
+    }
+
+    function decodePdfStr(rawStr, currentFont) {
+      const cmap = (currentFont && fontNameToCmap.get(currentFont)) || mergedCmap;
+
+      // 1. Replace octal escapes (\001, \002, etc.)
+      let str = rawStr.replace(/\\([0-7]{1,3})/g, (match, octal) => {
+        const code = parseInt(octal, 8);
+        if (cmap && cmap.has(code)) {
+          return cmap.get(code);
+        }
+        // Fallback for Nigerian language hook characters
+        if (code === 1) return 'ɗ';
+        if (code === 2) return 'ƙ';
+        if (code === 3) return 'ɓ';
+        if (code === 4) return 'ƴ';
+        return String.fromCharCode(code);
+      });
+
+      // 2. Replace raw unprintable characters using CMap if present
+      const chars = [];
+      for (let i = 0; i < str.length; i++) {
+        const code = str.charCodeAt(i);
+        if (code < 32 && cmap && cmap.has(code)) {
+          chars.push(cmap.get(code));
+        } else {
+          chars.push(str[i]);
+        }
+      }
+      str = chars.join('');
+
+      return str
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\b/g, '\b')
+        .replace(/\\f/g, '\f')
+        .replace(/\\([()\\])/g, '$1');
+    }
+
+    // 3. Extract text content streams
+    const streamRegex = /<<((?:(?!<<)[\s\S])*?)>>\s*stream(?:\r\n|\n)([\s\S]*?)endstream/g;
+    const paragraphs = [];
     let match;
 
     while ((match = streamRegex.exec(raw)) !== null) {
       const dict = match[1];
-      const streamBody = Buffer.from(match[2].trim(), 'latin1');
+      let streamBody = Buffer.from(match[2], 'latin1');
+      const lenMatch = dict.match(/\/Length\s+(\d+)/);
+      if (lenMatch) {
+        const expectedLen = parseInt(lenMatch[1], 10);
+        if (expectedLen > 0 && streamBody.length >= expectedLen) {
+          streamBody = streamBody.subarray(0, expectedLen);
+        }
+      }
 
-      // Skip embedded font binaries and CID mappings that don't contain document body text
+      // Skip embedded font binaries and CID metadata
       if (
         dict.includes('/FontFile') ||
         dict.includes('/Type /Font') ||
@@ -265,6 +361,7 @@ function extractPdfText(buffer) {
       }
 
       const decompressed = decompressPdfStream(streamBody, dict);
+      if (decompressed.includes('/CIDInit') || decompressed.includes('beginbfchar')) continue;
 
       // Extract text inside BT (Begin Text) ... ET (End Text) blocks
       const btRegex = /BT([\s\S]*?)ET/g;
@@ -273,25 +370,26 @@ function extractPdfText(buffer) {
       while ((btMatch = btRegex.exec(decompressed)) !== null) {
         const block = btMatch[1];
         const lines = [];
+        let currentFont = null;
 
-        // Match (...) Tj operators and (...) ' / " operators
-        const tjRegex = /\(([\s\S]*?)\)\s*(?:Tj|'|")/g;
-        let tjMatch;
-        while ((tjMatch = tjRegex.exec(block)) !== null) {
-          const decoded = decodePdfString(tjMatch[1]).trim();
-          if (decoded) lines.push(decoded);
-        }
+        // Track active font and extract text operators
+        const opRegex = /(?:\/([^\s\/]+)\s+[\d.]+\s+Tf)|\(([\s\S]*?)\)\s*(?:Tj|'|")|\[([\s\S]*?)\]\s*TJ/g;
+        let opMatch;
 
-        // Match [...] TJ array operators
-        const bracketTjRegex = /\[([\s\S]*?)\]\s*TJ/g;
-        let btjMatch;
-        while ((btjMatch = bracketTjRegex.exec(block)) !== null) {
-          const inner = btjMatch[1].match(/\(([\s\S]*?)\)/g);
-          if (inner) {
-            const joined = inner
-              .map((s) => decodePdfString(s.slice(1, -1)))
-              .join('');
-            if (joined.trim()) lines.push(joined.trim());
+        while ((opMatch = opRegex.exec(block)) !== null) {
+          if (opMatch[1]) {
+            currentFont = opMatch[1];
+          } else if (opMatch[2] !== undefined) {
+            const decoded = decodePdfStr(opMatch[2], currentFont).trim();
+            if (decoded) lines.push(decoded);
+          } else if (opMatch[3] !== undefined) {
+            const inner = opMatch[3].match(/\(([\s\S]*?)\)/g);
+            if (inner) {
+              const joined = inner
+                .map((s) => decodePdfStr(s.slice(1, -1), currentFont))
+                .join('');
+              if (joined.trim()) lines.push(joined.trim());
+            }
           }
         }
 
@@ -299,27 +397,10 @@ function extractPdfText(buffer) {
           paragraphs.push(lines.join(' '));
         }
       }
-
-      // Fallback within stream: if no BT/ET blocks were present, search for Tj/TJ directly
-      if (paragraphs.length === 0) {
-        const directTjRegex = /\(([\s\S]*?)\)\s*Tj/g;
-        let directMatch;
-        const directLines = [];
-        while ((directMatch = directTjRegex.exec(decompressed)) !== null) {
-          const decoded = decodePdfString(directMatch[1]).trim();
-          if (decoded && !/^[%\/0-9\s]+$/.test(decoded)) {
-            directLines.push(decoded);
-          }
-        }
-        if (directLines.length > 0) {
-          paragraphs.push(directLines.join(' '));
-        }
-      }
     }
 
     if (paragraphs.length > 0) {
-      const extracted = cleanText(paragraphs.join('\n\n'));
-      // Ensure we didn't extract raw PDF syntax
+      const extracted = cleanText(paragraphs.join('\n\n').normalize('NFC'));
       if (!extracted.startsWith('%PDF-') && !extracted.includes('endobj')) {
         return extracted;
       }

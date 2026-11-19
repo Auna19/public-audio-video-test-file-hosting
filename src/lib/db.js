@@ -332,6 +332,23 @@ export const mediaRepo = {
           error = retryRes.error;
         }
 
+        // If error mentions language foreign key constraint (23503)
+        if (error && (error.code === '23503' || error.message?.includes('languages') || error.message?.includes('language_code'))) {
+          console.warn('Supabase language foreign key violation; ensuring language exists in languages table.');
+          try {
+            await supabaseAdmin.from('languages').upsert({
+              code: payload.language_code || 'other',
+              name: payload.language || 'Other',
+              native_name: payload.language || 'Custom Language',
+              badge_color: 'bg-zinc-100 text-zinc-800 border-zinc-300',
+              created_at: new Date().toISOString()
+            });
+            const retryLang = await supabaseAdmin.from('media_files').insert(payload).select().maybeSingle();
+            data = retryLang.data;
+            error = retryLang.error;
+          } catch {}
+        }
+
         if (error) {
           console.error('Supabase media create error:', error.message);
         } else if (data) {
