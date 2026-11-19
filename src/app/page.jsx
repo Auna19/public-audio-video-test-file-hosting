@@ -27,8 +27,24 @@ export default function PublicLibraryPage() {
   const [selectedType, setSelectedType] = useState('all');
   const [selectedExt, setSelectedExt] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
+  const [languages, setLanguages] = useState(SUPPORTED_LANGUAGES);
   const [toasts, setToasts] = useState([]);
   const [notification, setNotification] = useState({ isOpen: false });
+
+  // Load dynamic languages
+  useEffect(() => {
+    fetch('/api/languages')
+      .then((res) => {
+        if (res.ok) return res.json();
+        return null;
+      })
+      .then((data) => {
+        if (Array.isArray(data?.languages) && data.languages.length > 0) {
+          setLanguages(data.languages);
+        }
+      })
+      .catch((err) => console.error('Failed to load dynamic languages:', err));
+  }, []);
 
   const handleCopyLink = (url, file) => {
     addToast('Direct file URL copied successfully!', 'success');
@@ -141,7 +157,7 @@ export default function PublicLibraryPage() {
               Multilingual Audio & Video Test Library
             </h1>
             <p className="mt-4 text-sm sm:text-base text-slate-300 leading-relaxed">
-              Explore and access sample audio and video recordings in different Nigerian languages.
+              Explore and access sample audio recordings, video files, and text documents across Nigerian and international languages.
               These files are provided for speech recognition, transcription, multilingual AI, and
               software testing purposes.
             </p>
@@ -208,7 +224,7 @@ export default function PublicLibraryPage() {
                 All Languages
               </button>
 
-              {SUPPORTED_LANGUAGES.map((lang) => (
+              {languages.map((lang) => (
                 <button
                   key={lang.code}
                   type="button"

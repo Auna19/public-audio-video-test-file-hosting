@@ -46,6 +46,10 @@ const LANGUAGE_SAMPLES = {
     title: 'English - Platform Introduction & Testing Script',
     text: 'Welcome to the Nigerian Multilingual Test Platform. This system hosts high-fidelity audio, video, and text documents across Nigerian languages including Hausa, Yoruba, Igbo, and Nigerian Pidgin for automated speech recognition and artificial intelligence testing.',
   },
+  other: {
+    title: 'Other / Custom Language - Multilingual Test Sample',
+    text: 'Welcome! This section supports custom and international languages including French, Arabic, and Swahili for speech synthesis and text-to-speech testing.',
+  },
 };
 
 export default function TextToAudioStudioPage() {
@@ -57,6 +61,7 @@ export default function TextToAudioStudioPage() {
   const [rate, setRate] = useState(1);
   const [copiedText, setCopiedText] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
+  const [languages, setLanguages] = useState(SUPPORTED_LANGUAGES);
 
   // Library state
   const [libraryFiles, setLibraryFiles] = useState([]);
@@ -86,6 +91,21 @@ export default function TextToAudioStudioPage() {
         window.speechSynthesis.cancel();
       }
     };
+  }, []);
+
+  // Fetch dynamic languages from API
+  useEffect(() => {
+    fetch('/api/languages')
+      .then((res) => {
+        if (res.ok) return res.json();
+        return null;
+      })
+      .then((data) => {
+        if (Array.isArray(data?.languages) && data.languages.length > 0) {
+          setLanguages(data.languages);
+        }
+      })
+      .catch((err) => console.error('Failed to load dynamic languages:', err));
   }, []);
 
   // Load public text/document files from API
@@ -125,12 +145,42 @@ export default function TextToAudioStudioPage() {
     setActiveLang(langCode);
     if (LANGUAGE_SAMPLES[langCode]) {
       setInputText(LANGUAGE_SAMPLES[langCode].text);
+    } else {
+      const match = languages.find((l) => l.code === langCode);
+      setInputText(`Sample text for ${match ? match.name : langCode} speech synthesis and text-to-audio testing.`);
     }
     if (isPlaying || isPaused) {
-      window.speechSynthesis.cancel();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
       setIsPlaying(false);
       setIsPaused(false);
     }
+  };
+
+  const handleLoadToStudio = (file) => {
+    if (!file.text_content) {
+      addToast('This document has no extracted text content.', 'info');
+      return;
+    }
+    setInputText(file.text_content);
+    if (file.language_code) {
+      setActiveLang(file.language_code);
+    }
+    if (file.public_url) {
+      setSourceUrl(file.public_url);
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 100, behavior: 'smooth' });
+    }
+    addToast(`Loaded "${file.title}" into Text-to-Audio Studio!`, 'success');
+    setNotification({
+      isOpen: true,
+      type: 'success',
+      title: 'Loaded into Studio! 🎙️',
+      message: `The extracted text from "${file.title}" (${file.language}) has been loaded into the interactive synthesizer.`,
+      autoCloseMs: 3500,
+    });
   };
 
   const handlePlayStudio = () => {
@@ -159,9 +209,21 @@ export default function TextToAudioStudioPage() {
 
     const voices = window.speechSynthesis.getVoices();
     if (voices && voices.length > 0) {
-      let matchedVoice = voices.find((v) => v.lang.includes('NG') || v.lang.includes('ng') || v.lang.includes('en-GB'));
+      let matchedVoice = null;
+      const langLower = (activeLang || '').toLowerCase();
+      if (langLower === 'fr' || langLower.includes('french')) {
+        matchedVoice = voices.find((v) => v.lang.startsWith('fr'));
+      } else if (langLower === 'ar' || langLower.includes('arabic')) {
+        matchedVoice = voices.find((v) => v.lang.startsWith('ar'));
+      } else if (langLower === 'sw' || langLower.includes('swahili')) {
+        matchedVoice = voices.find((v) => v.lang.startsWith('sw'));
+      } else if (['ha', 'yo', 'ig', 'pcm'].includes(langLower)) {
+        matchedVoice = voices.find((v) => v.lang.includes('NG') || v.lang.includes('ng') || v.lang.includes('en-GB'));
+      }
       if (!matchedVoice) {
-        matchedVoice = voices.find((v) => v.lang.startsWith('en')) || voices[0];
+        matchedVoice = voices.find((v) => v.lang.includes('NG') || v.lang.includes('ng') || v.lang.includes('en-GB')) ||
+                       voices.find((v) => v.lang.startsWith('en')) ||
+                       voices[0];
       }
       if (matchedVoice) {
         utterance.voice = matchedVoice;
@@ -304,8 +366,8 @@ export default function TextToAudioStudioPage() {
 
             {/* Language Quick Selector Pills */}
             <div className="flex flex-wrap items-center gap-1.5">
-              {['ha', 'yo', 'ig', 'pcm', 'en'].map((code) => {
-                const lang = SUPPORTED_LANGUAGES.find((l) => l.code === code);
+              {languages.map((lang) => {
+                const code = lang.code;
                 return (
                   <button
                     key={code}
@@ -317,7 +379,7 @@ export default function TextToAudioStudioPage() {
                         : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
-                    {lang ? lang.name : code}
+                    {lang.name}
                   </button>
                 );
               })}
@@ -486,7 +548,7 @@ export default function TextToAudioStudioPage() {
               >
                 All Languages
               </button>
-              {SUPPORTED_LANGUAGES.map((lang) => (
+              {languages.map((lang) => (
                 <button
                   key={lang.code}
                   type="button"
@@ -583,6 +645,15 @@ export default function TextToAudioStudioPage() {
                         });
                       }}
                     />
+
+                    <button
+                      type="button"
+                      onClick={() => handleLoadToStudio(file)}
+                      className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-800/80 px-3 py-2 text-xs font-bold transition cursor-pointer"
+                    >
+                      <Sparkles className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                      <span>Load into Studio Player</span>
+                    </button>
                   </div>
 
                   <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800/80 flex items-center justify-between text-xs">

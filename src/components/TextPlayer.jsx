@@ -72,7 +72,13 @@ export default function TextPlayer({
       // Look for regional or language voice
       const langLower = (language || '').toLowerCase();
       let matchedVoice = null;
-      if (langLower.includes('pidgin') || langLower.includes('nigeria') || langLower.includes('hausa') || langLower.includes('yoruba') || langLower.includes('igbo')) {
+      if (langLower.includes('french') || langLower.startsWith('fr')) {
+        matchedVoice = voices.find((v) => v.lang.startsWith('fr'));
+      } else if (langLower.includes('arabic') || langLower.startsWith('ar')) {
+        matchedVoice = voices.find((v) => v.lang.startsWith('ar'));
+      } else if (langLower.includes('swahili') || langLower.startsWith('sw')) {
+        matchedVoice = voices.find((v) => v.lang.startsWith('sw'));
+      } else if (langLower.includes('pidgin') || langLower.includes('nigeria') || langLower.includes('hausa') || langLower.includes('yoruba') || langLower.includes('igbo')) {
         matchedVoice = voices.find((v) => v.lang.includes('NG') || v.lang.includes('ng') || v.lang.includes('en-GB'));
       }
       if (!matchedVoice) {

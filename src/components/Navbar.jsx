@@ -57,7 +57,7 @@ export default function Navbar() {
                 Audio & Video Test Host
               </span>
               <span className="rounded-md bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold tracking-wider text-emerald-700 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 uppercase">
-                Nigerian Languages
+                Multilingual Test Platform
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400">
