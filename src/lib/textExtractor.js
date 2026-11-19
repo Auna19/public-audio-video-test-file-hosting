@@ -31,8 +31,13 @@ export function extractTextFromBuffer(input, fileName = '') {
       case '.docx':
         return extractDocxText(buffer);
 
-      case '.pdf':
-        return extractPdfText(buffer);
+      case '.pdf': {
+        const text = extractPdfText(buffer);
+        if (text && !text.startsWith('%PDF-') && !text.includes('endobj')) {
+          return text;
+        }
+        return '';
+      }
 
       default:
         // Try UTF-8 first, fallback to ASCII printable characters
@@ -130,66 +135,201 @@ function parseXmlWordDocument(xmlStr) {
 }
 
 /**
- * Basic PDF text stream extractor
+ * Decodes ASCII85 (Adobe Base85) encoded string into a Buffer
+ */
+function decodeAscii85(str) {
+  const clean = str.replace(/<~|~>/g, '').replace(/\s+/g, '');
+  const bytes = [];
+  let i = 0;
+
+  while (i < clean.length) {
+    if (clean[i] === 'z') {
+      bytes.push(0, 0, 0, 0);
+      i++;
+      continue;
+    }
+
+    const chunk = clean.slice(i, i + 5);
+    i += chunk.length;
+
+    let value = 0;
+    for (let j = 0; j < chunk.length; j++) {
+      value = value * 85 + (chunk.charCodeAt(j) - 33);
+    }
+
+    for (let j = chunk.length; j < 5; j++) {
+      value = value * 85 + 84;
+    }
+
+    const outLength = chunk.length - 1;
+    const b = [
+      (value >>> 24) & 0xff,
+      (value >>> 16) & 0xff,
+      (value >>> 8) & 0xff,
+      value & 0xff,
+    ];
+    for (let j = 0; j < outLength; j++) {
+      bytes.push(b[j]);
+    }
+  }
+
+  return Buffer.from(bytes);
+}
+
+/**
+ * Decodes ASCIIHex encoded string into a Buffer
+ */
+function decodeHex(hexStr) {
+  const clean = hexStr.replace(/\s+/g, '').replace(/>/g, '');
+  return Buffer.from(clean, 'hex');
+}
+
+/**
+ * Decompresses a PDF stream buffer considering Filter definitions
+ */
+function decompressPdfStream(streamBuffer, dictStr = '') {
+  let buf = streamBuffer;
+
+  if (
+    dictStr.includes('ASCII85Decode') ||
+    buf.subarray(0, 2).toString('latin1') === '<~' ||
+    /^[!-u\s]+~>/.test(buf.subarray(0, 50).toString('latin1'))
+  ) {
+    try {
+      buf = decodeAscii85(buf.toString('latin1'));
+    } catch {}
+  } else if (dictStr.includes('ASCIIHexDecode')) {
+    try {
+      buf = decodeHex(buf.toString('latin1'));
+    } catch {}
+  }
+
+  try {
+    return zlib.inflateSync(buf).toString('latin1');
+  } catch {
+    try {
+      return zlib.inflateRawSync(buf).toString('latin1');
+    } catch {
+      return buf.toString('latin1');
+    }
+  }
+}
+
+/**
+ * Decodes PDF string escapes and octal encodings (supporting Nigerian language hook characters)
+ */
+function decodePdfString(rawStr) {
+  // ReportLab / Type1 / TrueType octal glyph mappings (Hausa / Yoruba / Igbo characters)
+  let str = rawStr.replace(/\\([0-7]{1,3})/g, (match, octal) => {
+    const code = parseInt(octal, 8);
+    if (code === 1) return 'ɗ';
+    if (code === 2) return 'ƙ';
+    if (code === 3) return 'ɓ';
+    if (code === 4) return 'ƴ';
+    return String.fromCharCode(code);
+  });
+
+  return str
+    .replace(/\\n/g, '\n')
+    .replace(/\\r/g, '\r')
+    .replace(/\\t/g, '\t')
+    .replace(/\\b/g, '\b')
+    .replace(/\\f/g, '\f')
+    .replace(/\\([()\\])/g, '$1');
+}
+
+/**
+ * Robust PDF text stream extractor supporting compressed streams (FlateDecode, ASCII85Decode)
  */
 function extractPdfText(buffer) {
   try {
     const raw = buffer.toString('latin1');
-    const textPieces = [];
+    const paragraphs = [];
 
-    // Find and decompress streams
-    const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+    // Match each object dictionary that immediately precedes its stream
+    const streamRegex = /<<((?:(?!<<)[\s\S])*?)>>\s*stream\r?\n?([\s\S]*?)endstream/g;
     let match;
-    while ((match = streamRegex.exec(raw)) !== null) {
-      const streamBytes = Buffer.from(match[1], 'latin1');
-      let decompressed = '';
 
-      try {
-        decompressed = zlib.inflateSync(streamBytes).toString('latin1');
-      } catch {
-        try {
-          decompressed = zlib.inflateRawSync(streamBytes).toString('latin1');
-        } catch {
-          decompressed = match[1];
+    while ((match = streamRegex.exec(raw)) !== null) {
+      const dict = match[1];
+      const streamBody = Buffer.from(match[2].trim(), 'latin1');
+
+      // Skip embedded font binaries and CID mappings that don't contain document body text
+      if (
+        dict.includes('/FontFile') ||
+        dict.includes('/Type /Font') ||
+        dict.includes('/ToUnicode') ||
+        dict.includes('/CIDInit')
+      ) {
+        continue;
+      }
+
+      const decompressed = decompressPdfStream(streamBody, dict);
+
+      // Extract text inside BT (Begin Text) ... ET (End Text) blocks
+      const btRegex = /BT([\s\S]*?)ET/g;
+      let btMatch;
+
+      while ((btMatch = btRegex.exec(decompressed)) !== null) {
+        const block = btMatch[1];
+        const lines = [];
+
+        // Match (...) Tj operators and (...) ' / " operators
+        const tjRegex = /\(([\s\S]*?)\)\s*(?:Tj|'|")/g;
+        let tjMatch;
+        while ((tjMatch = tjRegex.exec(block)) !== null) {
+          const decoded = decodePdfString(tjMatch[1]).trim();
+          if (decoded) lines.push(decoded);
+        }
+
+        // Match [...] TJ array operators
+        const bracketTjRegex = /\[([\s\S]*?)\]\s*TJ/g;
+        let btjMatch;
+        while ((btjMatch = bracketTjRegex.exec(block)) !== null) {
+          const inner = btjMatch[1].match(/\(([\s\S]*?)\)/g);
+          if (inner) {
+            const joined = inner
+              .map((s) => decodePdfString(s.slice(1, -1)))
+              .join('');
+            if (joined.trim()) lines.push(joined.trim());
+          }
+        }
+
+        if (lines.length > 0) {
+          paragraphs.push(lines.join(' '));
         }
       }
 
-      // Look for text operators: (...) Tj or [...] TJ
-      const tjRegex = /\(([\s\S]*?)\)\s*Tj/g;
-      let tjMatch;
-      while ((tjMatch = tjRegex.exec(decompressed)) !== null) {
-        textPieces.push(cleanPdfString(tjMatch[1]));
-      }
-
-      const bracketTjRegex = /\[([\s\S]*?)\]\s*TJ/g;
-      let btMatch;
-      while ((btMatch = bracketTjRegex.exec(decompressed)) !== null) {
-        const innerStrings = btMatch[1].match(/\(([\s\S]*?)\)/g);
-        if (innerStrings) {
-          const joined = innerStrings
-            .map((s) => cleanPdfString(s.slice(1, -1)))
-            .join(' ');
-          textPieces.push(joined);
+      // Fallback within stream: if no BT/ET blocks were present, search for Tj/TJ directly
+      if (paragraphs.length === 0) {
+        const directTjRegex = /\(([\s\S]*?)\)\s*Tj/g;
+        let directMatch;
+        const directLines = [];
+        while ((directMatch = directTjRegex.exec(decompressed)) !== null) {
+          const decoded = decodePdfString(directMatch[1]).trim();
+          if (decoded && !/^[%\/0-9\s]+$/.test(decoded)) {
+            directLines.push(decoded);
+          }
+        }
+        if (directLines.length > 0) {
+          paragraphs.push(directLines.join(' '));
         }
       }
     }
 
-    if (textPieces.length > 0) {
-      return cleanText(textPieces.join(' '));
+    if (paragraphs.length > 0) {
+      const extracted = cleanText(paragraphs.join('\n\n'));
+      // Ensure we didn't extract raw PDF syntax
+      if (!extracted.startsWith('%PDF-') && !extracted.includes('endobj')) {
+        return extracted;
+      }
     }
   } catch (err) {
-    console.warn('PDF stream extraction fallback:', err.message);
+    console.warn('PDF stream extraction warning:', err.message);
   }
 
-  return extractPrintableChars(buffer);
-}
-
-function cleanPdfString(str) {
-  return str
-    .replace(/\\([()\\])/g, '$1')
-    .replace(/\\r/g, '\r')
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t');
+  // Never return raw PDF file syntax
+  return '';
 }
 
 /**
@@ -237,7 +377,11 @@ function extractPrintableChars(buffer) {
     result.push(Buffer.from(currentWord).toString('utf-8'));
   }
 
-  return cleanText(result.join(' '));
+  const cleaned = cleanText(result.join(' '));
+  if (cleaned.startsWith('%PDF-') || cleaned.includes('endobj')) {
+    return '';
+  }
+  return cleaned;
 }
 
 function cleanText(str) {
